@@ -1,0 +1,60 @@
+name: iOS build & accuracy tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & test (iOS Simulator)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        run: sudo xcode-select -switch /Applications/Xcode.app
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # Pick a simulator that exists on the runner (name/OS vary by image),
+      # so we don't hard-code an iPhone model that may not be installed.
+      - name: Resolve a booted-capable iOS simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys;
+          d=json.load(sys.stdin)['devices'];
+          cands=[dev for runtime in d for dev in d[runtime] if dev.get('isAvailable') and 'iPhone' in dev['name']];
+          print(cands[0]['udid'] if cands else '')")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator UDID: $UDID"
+
+      - name: Build
+        run: |
+          xcodebuild build \
+            -scheme Metronome \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Test (headless accuracy + math)
+        run: |
+          xcodebuild test \
+            -scheme Metronome \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO
