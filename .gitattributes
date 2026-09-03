@@ -1,0 +1,11 @@
+# This project is authored on Windows but built on macOS. Force LF for all text so
+# no CRLF leaks into the Xcode/CI checkout.
+* text=auto eol=lf
+
+# Explicitly treat known binaries as binary (none committed yet, but future-proofing).
+*.png binary
+*.jpg binary
+*.pdf binary
+*.wav binary
+*.aiff binary
+*.caf binary
