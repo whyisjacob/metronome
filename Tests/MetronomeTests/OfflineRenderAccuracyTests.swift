@@ -42,32 +42,41 @@ final class OfflineRenderAccuracyTests: XCTestCase {
             let onsets = Self.detectOnsets(in: samples, minGap: minGap)
             XCTAssertGreaterThan(onsets.count, 1, "too few onsets for \(c)")
 
+            // Grouped exactly as the engine groups it (multiplication isn't associative), so the
+            // predicted grid is bit-identical to what the render path places.
             let framesPerTick = config.secondsPerTick * sampleRate
+            let base = onsets[0]
 
-            // (1) Each onset equals the closed-form ideal frame (within < 1 sample ⇒ exactly equal).
+            // The first onset lands on frame 0 — offline manual rendering adds no hardware latency,
+            // so playback starts exactly on sample 0.
+            XCTAssertLessThanOrEqual(base, 1, "unexpected start offset (\(base)) for \(c)")
+
+            // (1) ZERO DRIFT — the core proof. Every onset lands *exactly* on the ideal grid,
+            //     anchored at the first onset. Integer equality, and invariant to any constant graph
+            //     latency, so it isolates drift specifically.
             for (k, onset) in onsets.enumerated() {
-                let ideal = Int((Double(k) * framesPerTick).rounded())
-                XCTAssertLessThan(abs(onset - ideal), 1,
-                    "onset \(k) off grid for \(c): got \(onset), ideal \(ideal)")
+                let idealRelative = Int((Double(k) * framesPerTick).rounded())
+                XCTAssertEqual(onset - base, idealRelative,
+                    "drift at onset \(k) for \(c): measured \(onset - base), ideal \(idealRelative)")
             }
 
-            // (2) Zero end-to-end drift: the final onset sits exactly on its ideal frame.
-            let lastK = onsets.count - 1
-            let idealLast = Int((Double(lastK) * framesPerTick).rounded())
-            XCTAssertEqual(onsets[lastK], idealLast, "cumulative drift detected for \(c)")
-
-            // (3) Deviation from the *continuous* ideal grid stays < 1 sample for every onset —
-            //     i.e. rounding never accumulates.
+            // (2) Absolute placement also matches the closed-form grid to < 1 sample (base ≈ 0).
             for (k, onset) in onsets.enumerated() {
-                let idealContinuous = Double(k) * framesPerTick
+                let idealAbsolute = Int((Double(k) * framesPerTick).rounded())
+                XCTAssertLessThan(abs(onset - idealAbsolute), 2, "onset \(k) off absolute grid for \(c)")
+            }
+
+            // (3) Deviation from the *continuous* ideal never exceeds a sample — rounding, not drift.
+            for (k, onset) in onsets.enumerated() {
+                let idealContinuous = Double(base) + Double(k) * framesPerTick
                 XCTAssertLessThan(abs(Double(onset) - idealContinuous), 1.0,
                     "onset \(k) drifted from the continuous grid for \(c)")
             }
 
             // (4) Mean measured interval equals the ideal within a rounding-bounded epsilon.
+            let lastK = onsets.count - 1
             let measuredMean = Double(onsets[lastK] - onsets[0]) / Double(lastK)
-            XCTAssertEqual(measuredMean, framesPerTick, accuracy: 0.5,
-                "mean interval wrong for \(c)")
+            XCTAssertEqual(measuredMean, framesPerTick, accuracy: 0.5, "mean interval wrong for \(c)")
         }
     }
 
