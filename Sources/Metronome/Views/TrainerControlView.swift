@@ -10,7 +10,7 @@ struct TrainerControlView: View {
     private var trainer: GapTrainer { viewModel.trainer }
 
     var body: some View {
-        Card("Gap-click trainer") {
+        VStack(alignment: .leading, spacing: 12) {
             Toggle(isOn: Binding(get: { trainer.isEnabled },
                                  set: { viewModel.setTrainerEnabled($0) })) {
                 Text("Silence beats to practise internal time")

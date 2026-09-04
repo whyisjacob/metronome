@@ -72,4 +72,40 @@ final class VoiceSubdivisionTests: XCTestCase {
         XCTAssertTrue(table.isEmpty || table.count == VoiceSyllable.allCases.count,
                       "syllable table must be empty (no synthesis) or one buffer per syllable")
     }
+
+    /// With the "count subdivisions" preference OFF, Voice mode speaks only the beats and clicks the
+    /// in-between ticks — a sound must still land on EVERY tick so the count is never lost. Deterministic:
+    /// the off-beat clicks regardless of whether speech synthesis is available in the environment. This
+    /// also exercises the engine's `setSpeakSubdivisions(false)` gate.
+    func testVoiceWithSubdivisionsOffStillSoundsEveryTick() throws {
+        let bpm = 90.0
+        let tpb = 4                                        // sixteenth (musical fact, hard-coded)
+        let framesPerTick = (60.0 / bpm / Double(tpb)) * sampleRate
+        let config = MetronomeConfiguration(bpm: bpm, timeSignature: .common,
+                                            subdivision: .sixteenth, sound: .voice)
+
+        let engine = MetronomeEngine()
+        try engine.prepareForOfflineRendering(sampleRate: sampleRate)
+        defer { engine.teardownOfflineRendering() }
+        engine.setSpeakSubdivisions(false)
+
+        let seconds = 4.0
+        let samples = try engine.renderOffline(config: config, seconds: seconds)
+        XCTAssertFalse(samples.isEmpty)
+
+        let totalFrames = Int((seconds * sampleRate).rounded())
+        var tick = 0
+        var checked = 0
+        while true {
+            let f = Int((Double(tick) * framesPerTick).rounded())
+            if f + 512 >= totalFrames { break }
+            var peak: Float = 0
+            for i in f..<(f + 512) { peak = max(peak, abs(samples[i])) }
+            XCTAssertGreaterThan(peak, 0.03,
+                "subdivisions-off voice: no sound at tick \(tick) (frame \(f)) — count lost")
+            tick += 1
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 8, "too few ticks checked")
+    }
 }

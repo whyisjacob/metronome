@@ -1,31 +1,30 @@
 import SwiftUI
 
 /// Quick-access to the last few unique settings, as a horizontal row of chips. Tapping a chip loads
-/// that configuration (restoring its stored BPM). Renders nothing when there are no recents.
+/// that configuration (restoring its stored BPM). Card-less content — it lives inside the "Recents"
+/// section of the unified Settings screen; when empty it shows a short explanatory note instead.
 struct RecentsBar: View {
     @ObservedObject var recents: RecentsStore
     let onSelect: (MetronomeConfiguration) -> Void
 
     var body: some View {
-        if !recents.recents.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("RECENTS")
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(1.3)
-                    .foregroundStyle(Theme.textSecondary)
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(recents.recents) { item in
-                            Button(action: { onSelect(item.config) }) {
-                                chip(for: item.config)
-                            }
-                            .buttonStyle(.plain)
+        if recents.recents.isEmpty {
+            Text("Play a few different settings and they show up here for one-tap recall.")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(recents.recents) { item in
+                        Button(action: { onSelect(item.config) }) {
+                            chip(for: item.config)
                         }
+                        .buttonStyle(.plain)
                     }
-                    .padding(.horizontal, 2)
-                    .padding(.vertical, 2)
                 }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

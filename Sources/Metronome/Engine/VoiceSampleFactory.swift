@@ -49,7 +49,11 @@ enum VoiceSampleFactory {
         let cases = VoiceSyllable.allCases
         var table = [[Float]](repeating: [], count: cases.count)
         for s in cases {
-            table[s.rawValue] = renderOne(s.spokenText, synth: synth, voice: voice, sampleRate: sampleRate)
+            let raw = renderOne(s.spokenText, synth: synth, voice: voice, sampleRate: sampleRate)
+            // Syllables ("e", "and", "a", …) are aggressively compacted so they fit inside a fast
+            // subdivision tick and finish before the next one — the engine additionally hard-cuts the
+            // previous count at the next onset, so together they never slur or overlap.
+            table[s.rawValue] = compactSyllable(raw, sampleRate: sampleRate)
         }
         return table.allSatisfy(\.isEmpty) ? [] : table
     }
@@ -138,6 +142,30 @@ enum VoiceSampleFactory {
               let last = samples.lastIndex(where: { abs($0) >= threshold }) else { return [] }
         if first == 0 && last == samples.count - 1 { return samples }
         return Array(samples[first...last])
+    }
+
+    /// Tightens a counting *syllable* buffer for fast subdivision counting: trims outer near-silence a hair
+    /// more aggressively than a number (so the token starts crisply at frame 0 and drops its dead tail),
+    /// then caps the total length so a syllable comfortably fits inside a subdivision tick, with a short
+    /// fade at the cap so the truncation never clicks. The onset stays at frame 0, so a scheduled syllable
+    /// still lands exactly on its tick. Returns `[]` for all-silence (⇒ the engine clicks the tick).
+    static func compactSyllable(_ samples: [Float],
+                                sampleRate: Double,
+                                maxSeconds: Double = 0.13,
+                                threshold: Float = 0.03) -> [Float] {
+        let trimmed = trimSilence(samples, threshold: threshold)
+        guard !trimmed.isEmpty, sampleRate > 0 else { return trimmed }
+        let maxFrames = max(1, Int(maxSeconds * sampleRate))
+        guard trimmed.count > maxFrames else { return trimmed }
+
+        var capped = Array(trimmed[0..<maxFrames])
+        // Fade the last few ms to zero so a hard length cap never introduces a click.
+        let fade = min(capped.count, max(1, Int(0.004 * sampleRate)))
+        let start = capped.count - fade
+        for j in 0..<fade {
+            capped[start + j] *= Float(fade - j) / Float(fade)
+        }
+        return capped
     }
 
     // MARK: - Voice selection (prefer a natural, high-quality voice)

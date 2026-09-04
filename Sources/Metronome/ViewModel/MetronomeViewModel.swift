@@ -36,6 +36,9 @@ final class MetronomeViewModel: ObservableObject {
     private var lastPulseSequence: UInt64 = 0
     /// Optional Recents store: every committed configuration change is registered here.
     private let recents: RecentsStore?
+    /// Optional persisted sound preferences (selected timbre + speak-subdivisions). Injected by the app;
+    /// `nil` in previews/tests, where the sound simply isn't persisted and defaults to the classic click.
+    private let soundSettings: SoundSettingsStore?
 
     // Read-through for views.
     var bpm: Double { config.bpm }
@@ -43,12 +46,21 @@ final class MetronomeViewModel: ObservableObject {
     var subdivision: Subdivision { config.subdivision }
     var accents: [BeatAccent] { config.accents }
     var sound: MetronomeSound { config.sound }
+    /// Whether Voice mode speaks the in-between subdivision syllables (persisted; default on).
+    var speakSubdivisions: Bool { soundSettings?.speakSubdivisions ?? true }
 
     init(config: MetronomeConfiguration = MetronomeConfiguration(),
-         recents: RecentsStore? = nil) {
-        self.config = config
+         recents: RecentsStore? = nil,
+         soundSettings: SoundSettingsStore? = nil) {
         self.recents = recents
-        engine.update(config)
+        self.soundSettings = soundSettings
+        // Restore the persisted sound preference (default classic) as the starting timbre, so the sound
+        // you last chose is what you hear on launch; everything else (tempo, meter, …) starts fresh.
+        var initial = config
+        if let soundSettings { initial.sound = soundSettings.sound }
+        self.config = initial
+        engine.update(initial)
+        if let soundSettings { engine.setSpeakSubdivisions(soundSettings.speakSubdivisions) }
         engine.onPlaybackStateChanged = { [weak self] playing in
             // Delivered on the main queue by the engine.
             self?.reconcilePlaybackState(playing)
@@ -103,7 +115,18 @@ final class MetronomeViewModel: ObservableObject {
 
     func setSubdivision(_ subdivision: Subdivision) { updateConfig { $0.subdivision = subdivision } }
 
-    func setSound(_ sound: MetronomeSound) { updateConfig { $0.sound = sound } }
+    func setSound(_ sound: MetronomeSound) {
+        updateConfig { $0.sound = sound }
+        soundSettings?.setSound(sound)
+    }
+
+    /// Toggles whether Voice mode speaks the subdivisions aloud. Persists the preference and applies it to
+    /// the engine live — it changes only whether an off-beat tick speaks a syllable or clicks, never the
+    /// sample-accurate timing.
+    func setSpeakSubdivisions(_ on: Bool) {
+        soundSettings?.setSpeakSubdivisions(on)
+        engine.setSpeakSubdivisions(on)
+    }
 
     /// Loads a saved recent: applies its full configuration (restoring its BPM) and re-registers it so
     /// it surfaces to the top of Recents. Playback state is unchanged.

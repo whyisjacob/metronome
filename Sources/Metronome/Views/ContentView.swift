@@ -1,21 +1,28 @@
 import SwiftUI
 import Combine
 
-/// The main metronome screen: a clean primary flow — the chosen visual indicator, tempo, a prominent
-/// Start, and the core controls (meter, subdivision, sound). Secondary options (visual style, border
-/// flash, accents, voice) live behind the settings button; "Save as Song" turns the current settings
-/// into a new song and opens the editor.
+/// The main metronome screen — the absolute base only: the beat visual, the tempo (readout, slider, ±1,
+/// tap), Start/Stop, and the current time signature + subdivision (both changed constantly). *Everything*
+/// else — sound, voice, accents, visuals, border flash, the gap trainer, recents — lives behind the
+/// settings button in one unified, collapsible Settings screen, so nothing is scattered. The bookmark
+/// button saves the current settings as a Song, with an explicit name prompt and a clear confirmation.
 struct ContentView: View {
     @ObservedObject var viewModel: MetronomeViewModel
     @ObservedObject var recents: RecentsStore
     @ObservedObject var settings: VisualSettingsStore
+    @ObservedObject var soundSettings: SoundSettingsStore
     @ObservedObject var store: SongStore
 
     /// Display-rate ticker that refreshes the visual beat indicator. This is purely cosmetic — click
     /// timing is sample-accurate in the audio engine and never depends on this timer.
     @State private var ticker = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
     @State private var showSettings = false
-    @State private var songDraft: Song?
+
+    // Save-as-Song: an explicit, confirmed flow. The bookmark opens a name prompt; only "Save" persists
+    // (so cancelling leaves nothing behind), and a brief banner confirms the song reached the library.
+    @State private var showSaveSongDialog = false
+    @State private var newSongName = ""
+    @State private var savedSongName: String?
 
     var body: some View {
         ZStack {
@@ -37,12 +44,10 @@ struct ContentView: View {
                         viewModel.toggle()
                     }
 
-                    RecentsBar(recents: recents) { viewModel.load($0) }
-
+                    // Meter + subdivision stay on the main screen: they're changed constantly, and they're
+                    // the "current time signature + subdivision" readout. Everything else is in Settings.
                     MeterControlView(viewModel: viewModel)
                     SubdivisionControlView(viewModel: viewModel)
-                    SoundControlView(viewModel: viewModel)
-                    TrainerControlView(viewModel: viewModel)
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
@@ -56,16 +61,22 @@ struct ContentView: View {
                                enabled: settings.borderFlashEnabled,
                                accentColor: settings.accentFlashColor,
                                normalColor: settings.normalFlashColor)
+
+            savedBanner
         }
         .foregroundStyle(Theme.textPrimary)
         .onReceive(ticker) { _ in viewModel.pollPulse() }
         .sheet(isPresented: $showSettings) {
-            SettingsView(settings: settings, viewModel: viewModel)
+            SettingsView(settings: settings, viewModel: viewModel,
+                         soundSettings: soundSettings, recents: recents)
                 .preferredColorScheme(.dark)
         }
-        .sheet(item: $songDraft) { song in
-            SongBuilderView(song: song, store: store, settings: settings)
-                .preferredColorScheme(.dark)
+        .alert("Save as Song", isPresented: $showSaveSongDialog) {
+            TextField("Song name", text: $newSongName)
+            Button("Save", action: saveAsSong)
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Saves the current tempo, meter, subdivision and accents as a new song in your library. You can add more sections later in the Songs tab.")
         }
     }
 
@@ -87,7 +98,7 @@ struct ContentView: View {
 
             Spacer()
 
-            Button(action: saveAsSong) {
+            Button(action: presentSaveSong) {
                 Image(systemName: "bookmark")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(Theme.textSecondary)
@@ -97,12 +108,47 @@ struct ContentView: View {
         .padding(.top, 4)
     }
 
-    /// Creates a song from the current settings (as its first section), saves it to the library, and
-    /// opens the editor so it can be named and grown into a full tempo-map.
+    /// A brief, self-dismissing confirmation that the song was saved — so the user is never unsure whether
+    /// or how their settings persisted to the library.
+    @ViewBuilder private var savedBanner: some View {
+        if let name = savedSongName {
+            VStack {
+                Spacer()
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Theme.start)
+                    Text("Saved “\(name)” to Songs")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surfaceRaised))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke))
+                .padding(.bottom, 28)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .accessibilityAddTraits(.isStaticText)
+        }
+    }
+
+    /// Opens the name prompt, pre-filled with a sensible default (tempo + meter) so Save works in one tap.
+    private func presentSaveSong() {
+        newSongName = "\(Int(viewModel.bpm.rounded())) BPM · \(viewModel.timeSignature.displayString)"
+        showSaveSongDialog = true
+    }
+
+    /// Creates a song from the current settings, saves it to the library, and shows a confirmation. Only
+    /// reached from the prompt's explicit "Save", so cancelling never leaves an orphaned song behind.
     private func saveAsSong() {
-        let song = Song(fromCurrentSettings: viewModel.config)
+        let trimmed = newSongName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmed.isEmpty ? "New Song" : trimmed
+        let song = Song(fromCurrentSettings: viewModel.config, name: name)
         store.upsert(song)
-        songDraft = song
+        withAnimation(.easeInOut(duration: 0.25)) { savedSongName = name }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+            withAnimation(.easeInOut(duration: 0.3)) { savedSongName = nil }
+        }
     }
 }
 
@@ -110,6 +156,7 @@ struct ContentView: View {
     ContentView(viewModel: MetronomeViewModel(),
                 recents: RecentsStore(),
                 settings: VisualSettingsStore(),
+                soundSettings: SoundSettingsStore(),
                 store: SongStore())
         .preferredColorScheme(.dark)
 }

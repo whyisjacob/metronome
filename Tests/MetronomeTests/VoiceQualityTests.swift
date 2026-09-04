@@ -124,4 +124,41 @@ final class VoiceQualityTests: XCTestCase {
         }
         XCTAssertGreaterThan(checked, 8, "too few ticks checked")
     }
+
+    // MARK: - Aggressive syllable compaction (so a fast count fits inside its tick)
+
+    func testCompactSyllableCapsLength() {
+        // 0.5 s of loud samples, capped to 0.13 s so it fits inside a fast subdivision tick.
+        let long = [Float](repeating: 0.5, count: Int(0.5 * sampleRate))
+        let compact = VoiceSampleFactory.compactSyllable(long, sampleRate: sampleRate, maxSeconds: 0.13)
+        XCTAssertGreaterThan(compact.count, 0)
+        XCTAssertLessThanOrEqual(compact.count, Int(0.13 * sampleRate) + 1)
+    }
+
+    func testCompactSyllableKeepsOnsetAtFrameZero() {
+        // Leading silence then loud content: the onset must land at frame 0 so it stays on its tick.
+        var s = [Float](repeating: 0, count: 200)
+        s += [Float](repeating: 0.6, count: Int(0.05 * sampleRate))
+        let compact = VoiceSampleFactory.compactSyllable(s, sampleRate: sampleRate)
+        XCTAssertGreaterThan(abs(compact.first ?? 0), 0.05, "onset not at frame 0 after trimming")
+    }
+
+    func testCompactSyllableShortBufferPassesThrough() {
+        // A syllable already under the cap keeps its samples (outer-trimmed only).
+        let short: [Float] = [0.5, -0.5, 0.5, -0.5]
+        XCTAssertEqual(VoiceSampleFactory.compactSyllable(short, sampleRate: sampleRate, maxSeconds: 0.13), short)
+    }
+
+    func testCompactSyllableAllSilenceIsEmpty() {
+        let silent = [Float](repeating: 0, count: 1000)
+        XCTAssertTrue(VoiceSampleFactory.compactSyllable(silent, sampleRate: sampleRate).isEmpty,
+                      "all-silence ⇒ empty (engine clicks the tick)")
+    }
+
+    func testCompactSyllableEndFadesToAvoidAClick() {
+        // The hard length cap fades out, so the truncation can't pop.
+        let long = [Float](repeating: 0.5, count: Int(0.5 * sampleRate))
+        let compact = VoiceSampleFactory.compactSyllable(long, sampleRate: sampleRate, maxSeconds: 0.13)
+        XCTAssertLessThan(abs(compact.last ?? 1), 0.2, "capped tail should be faded toward zero")
+    }
 }

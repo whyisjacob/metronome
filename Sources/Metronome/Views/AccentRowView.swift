@@ -9,7 +9,7 @@ struct AccentRowView: View {
     private let columns = [GridItem(.adaptive(minimum: 48), spacing: 8)]
 
     var body: some View {
-        Card("Accents") {
+        VStack(alignment: .leading, spacing: 12) {
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(Array(viewModel.accents.indices), id: \.self) { index in
                     Button(action: { viewModel.cycleAccent(index) }) {

@@ -63,6 +63,11 @@ final class MetronomeEngine {
         var classicTable: [[Float]] = []    // always the classic click — song mode & fallback
         /// Single-tempo Voice mode: speak the beat number instead of clicking on beats.
         var voiceMode = false
+        /// User preference: in Voice mode also speak the in-between subdivision syllables ("1 e and a").
+        /// When off — or at a tempo too fast to articulate them — the subdivisions click instead, so the
+        /// beat numbers still speak cleanly. Default on. Read live by the render callback; never affects
+        /// onset timing.
+        var speakSubdivisions = true
         /// Sample rate `voiceTable` was rendered at (0 = none) and the rate currently rendering in the
         /// background (0 = idle). Guard the lazy voice render so it publishes/re-renders exactly once.
         var voiceRate: Double = 0
@@ -131,6 +136,7 @@ final class MetronomeEngine {
     private var atVoiceSyllableTable: [[Float]] = []
     private var atClassicTable: [[Float]] = []
     private var atVoiceMode = false
+    private var atSpeakSubdivisions = true
     /// The single-tempo plan the audio thread is currently scheduling from. Compared by identity against
     /// the published plan each block to detect a live swap (a new `RenderPlan` from `update(_:)`); `nil`
     /// after a reset so the first plan anchors cleanly. Audio-thread-only, so no synchronization needed.
@@ -138,6 +144,10 @@ final class MetronomeEngine {
     /// Length of the spoken-number release fade, in frames (set per sample rate). Read on the audio
     /// thread; written once in `installSourceNode` before audio flows.
     private var voiceReleaseFrames = 256
+    /// Declick length (frames) for the hard cut applied to a still-sounding spoken token at the next
+    /// spoken onset, so successive counts never overlap. A couple of milliseconds — short enough to read
+    /// as an immediate stop, long enough not to click. Set per sample rate in `installSourceNode`.
+    private var voiceHardCutFrames = 64
 
     // MARK: Voice pre-rendering (main-thread bookkeeping + a background render queue)
 
@@ -235,6 +245,13 @@ final class MetronomeEngine {
                 }
             }
         }
+    }
+
+    /// Sets whether Voice mode speaks the in-between subdivision syllables. Read live by the render
+    /// callback (no plan rebuild, no timing change): it only decides whether an off-beat tick speaks a
+    /// syllable or clicks. Default on.
+    func setSpeakSubdivisions(_ on: Bool) {
+        control.withLock { $0.speakSubdivisions = on }
     }
 
     // MARK: - Real-time transport
@@ -348,6 +365,7 @@ final class MetronomeEngine {
         }
         configuredSampleRate = sampleRate
         voiceReleaseFrames = max(Int(0.005 * sampleRate), 32)
+        voiceHardCutFrames = max(Int(0.0015 * sampleRate), 24)
 
         // Rebuild the classic click at this rate and publish it as both the default single-tempo table
         // and the song-mode/fallback table. `applySound` (from start/update) then overlays the selected
@@ -511,6 +529,7 @@ final class MetronomeEngine {
         var voiceSyllableTable: [[Float]] = []
         var classicTable: [[Float]] = []
         var voiceMode = false
+        var speakSubdivisions = true
         control.withLockUnchecked { c in
             running = c.running
             plan = c.plan
@@ -520,6 +539,7 @@ final class MetronomeEngine {
             voiceSyllableTable = c.voiceSyllableTable
             classicTable = c.classicTable
             voiceMode = c.voiceMode
+            speakSubdivisions = c.speakSubdivisions
             if c.resetRequested { c.resetRequested = false; didReset = true }
         }
         atSelectedTable = selectedTable
@@ -527,6 +547,7 @@ final class MetronomeEngine {
         atVoiceSyllableTable = voiceSyllableTable
         atClassicTable = classicTable
         atVoiceMode = voiceMode
+        atSpeakSubdivisions = speakSubdivisions
 
         // Start from silence; voices/ticks mix in additively.
         for buffer in ablPtr {
@@ -547,14 +568,28 @@ final class MetronomeEngine {
             return noErr    // paused (or buffers not ready): output silence, do not advance the grid
         }
 
-        // 1) Continue voices still sounding from earlier blocks.
+        let blockStart = atState.framesElapsed
+        let blockEnd = blockStart + frames
+
+        // Where a still-sounding spoken token (a number or subdivision syllable) must be hard-cut: the
+        // next *spoken* onset in this block, so consecutive counts ("1", "e", "and", "a") never overlap.
+        // Computed only in single-tempo Voice mode — otherwise it stays `.max` and every voice mixes
+        // exactly as before, so the accuracy-critical click path is byte-for-byte unchanged. A ringing
+        // number is left alone under a following *click* (e.g. a clicked subdivision) — only a spoken
+        // onset replaces it.
+        var spokenCutOffset = Int.max
+        if atVoiceMode, songPlan == nil, let p = atPlan {
+            spokenCutOffset = firstSpokenOnsetOffset(plan: p, blockStart: blockStart, blockEnd: blockEnd)
+        }
+
+        // 1) Continue voices still sounding from earlier blocks. A spoken token is hard-cut at the next
+        // spoken onset so it can't bleed into the next count; clicks ring out unchanged.
         for vi in atState.voices.indices where atState.voices[vi].active {
-            mix(voiceIndex: vi, into: ablPtr, startFrame: 0, frameCount: frames)
+            let cut = (atVoiceMode && isSpokenTable(atState.voices[vi].table)) ? spokenCutOffset : Int.max
+            mix(voiceIndex: vi, into: ablPtr, startFrame: 0, frameCount: frames, hardCutAt: cut)
         }
 
         // 2) Trigger every onset falling within this block: [blockStart, blockEnd).
-        let blockStart = atState.framesElapsed
-        let blockEnd = blockStart + frames
 
         if let songPlan {
             // Song mode: walk the pre-expanded click stream by index. Same voice scheduling as below;
@@ -620,7 +655,8 @@ final class MetronomeEngine {
                             // subdivision can't fit, speak only the main beats and click the subdivisions
                             // (fast-tempo fallback) so the count is never lost; unmapped ticks click too.
                             var token = plan.voiceToken(forTick: tick)
-                            if !plan.speaksSubdivisionSyllables, case .syllable = token { token = .none }
+                            if case .syllable = token,
+                               !atSpeakSubdivisions || !plan.speaksSubdivisionSyllables { token = .none }
                             scheduleVoiceToken(token, level: level, at: offset,
                                                into: ablPtr, frameCount: frames)
                         } else {
@@ -732,12 +768,44 @@ final class MetronomeEngine {
     @inline(__always)
     private func isSpokenTable(_ table: Int) -> Bool { table == 1 || table == 3 }
 
+    /// The block-relative offset of the next tick in this block that *speaks* (a beat number, always, or a
+    /// subdivision syllable when the tempo/preference allows), or `.max` if none. Ticks that merely click
+    /// (a clicked subdivision, a trainer soft-downbeat, a muted/silenced pulse) are skipped, so a spoken
+    /// number keeps ringing under them and is cut only when the *next spoken* count is about to sound.
+    /// Cheap: it advances at most a couple of ticks (onsets are far wider than an audio block at any
+    /// speakable tempo). Audio-thread only; reads the same immutable plan the render loop schedules from.
+    private func firstSpokenOnsetOffset(plan: RenderPlan, blockStart: Int, blockEnd: Int) -> Int {
+        let tpb = max(plan.ticksPerBeat, 1)
+        var tick = atState.nextTick
+        while true {
+            let onset = atState.epochFrame + plan.frame(forTick: tick)
+            if onset >= blockEnd { return Int.max }
+            if onset >= blockStart {
+                let level = plan.accentLevel(forTick: tick)
+                let gate = plan.trainerGate(forTick: tick)
+                if level != .muted && gate == .play {
+                    if tick % tpb == 0 {
+                        return onset - blockStart                       // a beat: speaks its number
+                    } else if atSpeakSubdivisions && plan.speaksSubdivisionSyllables,
+                              case .syllable = plan.voiceToken(forTick: tick) {
+                        return onset - blockStart                       // a spoken subdivision syllable
+                    }
+                }
+            }
+            tick += 1
+        }
+    }
+
     /// Mixes one voice's remaining samples into the block starting at `startFrame`, advancing its
     /// playhead and deactivating it when exhausted. A voice with `fadeRemaining >= 0` is played through
     /// a linear release ramp and cut when the ramp completes. At full gain (`fadeRemaining < 0`) this is
     /// the original click mix, sample-for-sample.
+    ///
+    /// `hardCutAt` (block-relative frame, `.max` == none) stops a spoken token dead at the next spoken
+    /// onset with a couple-ms declick, so consecutive counts never overlap. Used *only* for spoken voices
+    /// in Voice mode; every other call passes `.max` and takes the original path, byte-for-byte unchanged.
     private func mix(voiceIndex vi: Int, into abl: UnsafeMutableAudioBufferListPointer,
-                     startFrame: Int, frameCount: Int) {
+                     startFrame: Int, frameCount: Int, hardCutAt: Int = .max) {
         guard let click = voiceBuffer(table: atState.voices[vi].table,
                                       index: atState.voices[vi].bufferIndex) else {
             atState.voices[vi].active = false
@@ -751,6 +819,34 @@ final class MetronomeEngine {
 
         let fade = atState.voices[vi].fadeRemaining
         let releaseLen = max(voiceReleaseFrames, 1)
+
+        // Hard-cut path (Voice mode only): mix up to the cut with a short declick, then stop this token —
+        // it is being replaced by the next count. Wholly separate so the default path below stays exact.
+        if hardCutAt != .max {
+            let mixN = min(n, max(0, hardCutAt - startFrame))
+            if mixN > 0 {
+                let declick = max(voiceHardCutFrames, 1)
+                click.withUnsafeBufferPointer { src in
+                    for buffer in abl {
+                        guard let base = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        for k in 0..<mixN {
+                            var gain: Float = 1
+                            if fade >= 0 {
+                                let f = fade - k
+                                if f <= 0 { break }
+                                gain *= Float(f) / Float(releaseLen)
+                            }
+                            let toCut = mixN - k                 // frames until the hard cut
+                            if toCut < declick { gain *= Float(toCut) / Float(declick) }
+                            base[startFrame + k] += src[playhead + k] * gain
+                        }
+                    }
+                }
+            }
+            atState.voices[vi].playhead = playhead + mixN
+            atState.voices[vi].active = false                    // replaced at the next onset — done
+            return
+        }
 
         click.withUnsafeBufferPointer { src in
             for buffer in abl {
