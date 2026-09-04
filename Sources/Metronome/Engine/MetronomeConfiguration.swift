@@ -9,12 +9,13 @@ import Foundation
 struct MetronomeConfiguration: Equatable, Codable {
     static let tempoRange: ClosedRange<Double> = 30...300
 
-    /// Beats (pulses) per minute. Clamped to `tempoRange`.
+    /// Beats (pulses) per minute — quarter notes in a simple meter, **dotted quarters** in a compound
+    /// one. Clamped to `tempoRange`.
     var bpm: Double
     var timeSignature: TimeSignature
     var subdivision: Subdivision
-    /// One flag per beat (`count == timeSignature.numerator`); `true` == accented.
-    var accents: [Bool]
+    /// One `BeatAccent` per main beat (`count == timeSignature.beatsPerBar`).
+    var accents: [BeatAccent]
     /// The click timbre, or the spoken-number Voice mode. Purely a sound choice — it has no effect on
     /// timing, so `RenderPlan`/`SongPlan` ignore it; only the engine's buffer selection consults it.
     var sound: MetronomeSound
@@ -22,20 +23,21 @@ struct MetronomeConfiguration: Equatable, Codable {
     init(bpm: Double = 120,
          timeSignature: TimeSignature = .common,
          subdivision: Subdivision = .quarter,
-         accents: [Bool]? = nil,
+         accents: [BeatAccent]? = nil,
          sound: MetronomeSound = .classic) {
         self.bpm = bpm.clamped(to: Self.tempoRange)
         self.timeSignature = timeSignature
         self.subdivision = subdivision
         self.sound = sound
-        // With no explicit accents, adopt the meter's sensible default (downbeat for simple meters,
-        // every group head for compound 6/8-style meters) rather than a bare downbeat-only pattern.
+        // With no explicit accents, adopt the meter's sensible default (downbeat + secondary group-head
+        // accents for simple meters, every dotted-quarter group head for compound 6/8-style meters).
         self.accents = MetronomeConfiguration.normalizedAccents(accents ?? timeSignature.defaultAccents,
-                                                                count: timeSignature.numerator)
+                                                                count: timeSignature.beatsPerBar)
     }
 
     // Decode through the validating initializer (clamps bpm, re-sizes accents) and tolerate a missing
-    // `sound` key so older/persisted configs still load. Encoding stays synthesized from `CodingKeys`.
+    // `sound` key so older/persisted configs still load. `BeatAccent` decoding also accepts the legacy
+    // `[Bool]` accent form. Encoding stays synthesized from `CodingKeys`.
     enum CodingKeys: String, CodingKey { case bpm, timeSignature, subdivision, accents, sound }
 
     init(from decoder: Decoder) throws {
@@ -43,19 +45,23 @@ struct MetronomeConfiguration: Equatable, Codable {
         let bpm = try c.decodeIfPresent(Double.self, forKey: .bpm) ?? 120
         let ts = try c.decodeIfPresent(TimeSignature.self, forKey: .timeSignature) ?? .common
         let sub = try c.decodeIfPresent(Subdivision.self, forKey: .subdivision) ?? .quarter
-        let accents = try c.decodeIfPresent([Bool].self, forKey: .accents)
+        let accents = try c.decodeIfPresent([BeatAccent].self, forKey: .accents)
         let sound = try c.decodeIfPresent(MetronomeSound.self, forKey: .sound) ?? .classic
         self.init(bpm: bpm, timeSignature: ts, subdivision: sub, accents: accents, sound: sound)
     }
 
     // MARK: - Derived timing
 
+    /// Seconds per main beat (a quarter in a simple meter, a dotted quarter in a compound one).
     var secondsPerBeat: Double { 60.0 / bpm }
-    var ticksPerBeat: Int { subdivision.ticksPerBeat }
+    /// Main beats (pulses) per bar.
+    var beatsPerBar: Int { timeSignature.beatsPerBar }
+    /// Clicks per main beat — compound-aware (a compound beat divides into 3 eighths, not 2).
+    var ticksPerBeat: Int { subdivision.ticksPerBeat(compound: timeSignature.isCompound) }
     /// Seconds between two consecutive clicks (beats *and* subdivisions).
     var secondsPerTick: Double { secondsPerBeat / Double(ticksPerBeat) }
     /// Total clicks in one bar.
-    var ticksPerBar: Int { ticksPerBeat * timeSignature.numerator }
+    var ticksPerBar: Int { ticksPerBeat * beatsPerBar }
 
     /// Frames between consecutive clicks at `sampleRate` (may be fractional).
     func framesPerTick(sampleRate: Double) -> Double {
@@ -77,11 +83,16 @@ struct MetronomeConfiguration: Equatable, Codable {
     }
 
     /// The emphasis of tick `n` (a global tick index counted from playback start).
+    ///
+    /// A **muted** beat suppresses its whole span — the on-beat click *and* the subdivisions inside it —
+    /// so the beat is genuinely silent; the engine still publishes the pulse so the count/visual advance.
     func accentLevel(forTick n: Int) -> AccentLevel {
         let tpb = ticksPerBeat
-        guard n % tpb == 0 else { return .weak }              // between beats → subdivision click
         let beat = beatIndexWithinBar(n / tpb)
-        return (accents.indices.contains(beat) && accents[beat]) ? .strong : .normal
+        let beatAccent = accents.indices.contains(beat) ? accents[beat] : .normal
+        if beatAccent == .muted { return .muted }             // whole beat (incl. subdivisions) silent
+        guard n % tpb == 0 else { return .weak }              // between beats → subdivision click
+        return beatAccent.audioLevel                          // strong / medium / normal
     }
 
     /// Beat index within the bar (0-based) for tick `n`, or `nil` if `n` is a subdivision click.
@@ -92,42 +103,45 @@ struct MetronomeConfiguration: Equatable, Codable {
     }
 
     private func beatIndexWithinBar(_ globalBeat: Int) -> Int {
-        let numerator = timeSignature.numerator
+        let beats = max(beatsPerBar, 1)
         // Swift's % can be negative; tick indices are non-negative so this is safe, but keep it
         // defensive for reuse.
-        let m = globalBeat % numerator
-        return m >= 0 ? m : m + numerator
+        let m = globalBeat % beats
+        return m >= 0 ? m : m + beats
     }
 
     // MARK: - Accent helpers
 
-    /// Toggles the accent of beat `index`, returning a new configuration.
-    func togglingAccent(at index: Int) -> MetronomeConfiguration {
+    /// Advances the accent of beat `index` to the next state in the tap-to-cycle order
+    /// (strong → medium → normal → muted → strong), returning a new configuration.
+    func cyclingAccent(at index: Int) -> MetronomeConfiguration {
         guard accents.indices.contains(index) else { return self }
         var copy = self
-        copy.accents[index].toggle()
+        copy.accents[index] = copy.accents[index].next
         return copy
     }
 
-    /// Ensures the accent array matches `count`, defaulting beat 0 accented and guaranteeing at
-    /// least one accent so the downbeat is never silent-by-omission.
-    static func normalizedAccents(_ accents: [Bool]?, count: Int) -> [Bool] {
+    /// Ensures the accent array matches `count`, padding with `.normal` and truncating as needed. When a
+    /// pattern is entirely `.normal` (no emphasis at all), the downbeat is promoted to `.strong` so a bar
+    /// is never accent-less by omission; explicit `.muted`/`.medium` choices are always respected, so a
+    /// deliberately all-muted (silent) bar is allowed.
+    static func normalizedAccents(_ accents: [BeatAccent]?, count: Int) -> [BeatAccent] {
         var result = accents ?? []
         if result.count < count {
-            result += Array(repeating: false, count: count - result.count)
+            result += Array(repeating: .normal, count: count - result.count)
         } else if result.count > count {
             result = Array(result.prefix(count))
         }
-        if !result.isEmpty && result.allSatisfy({ !$0 }) {
-            result[0] = true
+        if !result.isEmpty && result.allSatisfy({ $0 == .normal }) {
+            result[0] = .strong
         }
         return result
     }
 
-    /// Returns a copy re-normalized so `accents.count == numerator` after a meter change.
+    /// Returns a copy re-normalized so `accents.count == beatsPerBar` after a meter change.
     func normalizingAccents() -> MetronomeConfiguration {
         var copy = self
-        copy.accents = MetronomeConfiguration.normalizedAccents(accents, count: timeSignature.numerator)
+        copy.accents = MetronomeConfiguration.normalizedAccents(accents, count: timeSignature.beatsPerBar)
         return copy
     }
 
@@ -150,6 +164,6 @@ struct SettingsKey: Equatable, Hashable, Codable {
     var numerator: Int
     var denominator: Int
     var subdivision: Subdivision
-    var accents: [Bool]
+    var accents: [BeatAccent]
     var sound: MetronomeSound
 }

@@ -10,12 +10,16 @@ enum Theme {
     static let textPrimary    = Color(white: 0.97)
     static let textSecondary  = Color(white: 0.62)
 
-    /// Downbeat / accented beat.
+    /// Downbeat / primary accent.
     static let accentStrong   = Color(red: 1.00, green: 0.42, blue: 0.16)
+    /// Secondary (medium) accent — between strong and normal.
+    static let accentMedium   = Color(red: 1.00, green: 0.58, blue: 0.19)
     /// Unaccented beat.
     static let accentNormal   = Color(red: 1.00, green: 0.76, blue: 0.22)
     /// Idle (not currently sounding) beat dot.
     static let beatIdle       = Color(white: 0.24)
+    /// A muted beat marker (present, but silent).
+    static let beatMuted      = Color(white: 0.32)
 
     static let start          = Color(red: 0.20, green: 0.80, blue: 0.45)
     static let stop           = Color(red: 0.95, green: 0.30, blue: 0.32)
@@ -24,5 +28,17 @@ enum Theme {
     static func beatColor(isActive: Bool, accented: Bool) -> Color {
         guard isActive else { return beatIdle }
         return accented ? accentStrong : accentNormal
+    }
+
+    /// Colour for a beat dot given its accent state and whether it is the currently sounding beat. Muted
+    /// beats read as a dim marker even when active (they advance but never sound).
+    static func beatColor(for accent: BeatAccent, isActive: Bool) -> Color {
+        guard isActive else { return accent == .muted ? beatMuted.opacity(0.6) : beatIdle }
+        switch accent {
+        case .strong: return accentStrong
+        case .medium: return accentMedium
+        case .normal: return accentNormal
+        case .muted:  return beatMuted
+        }
     }
 }

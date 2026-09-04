@@ -83,14 +83,16 @@ final class SongPlan {
                 frames.append(cursor + Int((Double(i) * fpt).rounded()))
 
                 let tickWithinBar = i % ticksPerBar
-                if tickWithinBar % tpb == 0 {
-                    let beat = tickWithinBar / tpb                     // beat within the bar
-                    beatIndices.append(beat)
-                    let accented = pattern.indices.contains(beat) && pattern[beat]
-                    accents.append(accented ? .strong : .normal)
+                let beat = tickWithinBar / tpb                         // beat this tick belongs to
+                let onBeat = tickWithinBar % tpb == 0
+                let beatAccent = pattern.indices.contains(beat) ? pattern[beat] : .normal
+                beatIndices.append(onBeat ? beat : -1)                 // -1 for a between-beats click
+                if beatAccent == .muted {
+                    accents.append(.muted)                            // whole beat silent (engine skips it)
+                } else if onBeat {
+                    accents.append(beatAccent.audioLevel)             // strong / medium / normal
                 } else {
-                    beatIndices.append(-1)                            // subdivision click
-                    accents.append(.weak)
+                    accents.append(.weak)                             // subdivision click
                 }
                 sectionIndices.append(s)
                 barIndices.append(i / ticksPerBar)

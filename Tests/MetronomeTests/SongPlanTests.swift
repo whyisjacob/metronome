@@ -108,7 +108,9 @@ final class SongPlanTests: XCTestCase {
                         timeSignature: TimeSignature(numerator: spec.numerator,
                                                      denominator: spec.denominator),
                         subdivision: spec.subdivision,
-                        accentPattern: spec.accents,
+                        // The oracle uses boolean accents (true == accented); map them to the engine's
+                        // per-beat `BeatAccent` (accented → strong, else normal) for the real section.
+                        accentPattern: spec.accents.map { $0 ? BeatAccent.strong : .normal },
                         bars: spec.bars,
                         repeatCount: spec.repeatCount)
         })
@@ -297,6 +299,54 @@ final class SongPlanTests: XCTestCase {
         XCTAssertEqual(plan.beatInBar(at: 14), 0)
         XCTAssertNil(plan.beatInBar(at: 15))             // subdivision click, not a beat
         XCTAssertEqual(plan.beatInBar(at: 16), 1)
+    }
+
+    // MARK: - Compound section (dotted-quarter beat model)
+
+    /// A 6/8 section expands with the **dotted quarter** as the beat: 2 main beats, each an eighth
+    /// subdivision of 3. At 48 kHz the tempos give exact-integer frames, so the whole grid is written by
+    /// hand — proving `SongSection`/`SongPlan` adopt the compound model (BPM = dotted-quarter rate), not
+    /// the old eighth-rate model (which would give 6 pulses/bar spaced 3× too tightly).
+    func testCompoundSectionExpandsOnDottedQuarterBeats() {
+        let sr = 48_000.0
+        // 6/8 @ 120 dotted-quarter, eighth pulse: beatsPerBar 2, ticksPerBeat 3 → 6 ticks/bar;
+        // secondsPerTick = (60/120)/3 = 1/6 s → 8000 frames at 48 kHz.
+        let section = SongSection(name: "Jig", tempoBPM: 120,
+                                  timeSignature: TimeSignature(numerator: 6, denominator: 8),
+                                  subdivision: .eighth, bars: 1, repeatCount: 1)
+        XCTAssertEqual(section.beatsPerBar, 2)
+        XCTAssertEqual(section.ticksPerBeat, 3)
+        XCTAssertEqual(section.ticksPerBar, 6)
+        XCTAssertEqual(section.secondsPerTick, (60.0 / 120.0) / 3.0, accuracy: 1e-12)
+
+        let plan = SongPlan(song: Song(name: "J", sections: [section]), sampleRate: sr)
+        XCTAssertEqual(plan.clickCount, 6)
+        XCTAssertEqual(plan.totalFrames, 48_000)                 // 6 × 8000
+        for i in 0..<6 { XCTAssertEqual(plan.frame(at: i), i * 8_000, "compound click \(i)") }
+
+        // Default accents: two dotted-quarter group heads — strong then medium — with weak inner eighths.
+        XCTAssertEqual(plan.accent(at: 0), .strong)              // beat 1 head
+        XCTAssertEqual(plan.accent(at: 1), .weak)                // inner eighth
+        XCTAssertEqual(plan.accent(at: 2), .weak)
+        XCTAssertEqual(plan.accent(at: 3), .medium)              // beat 2 head
+        XCTAssertEqual(plan.accent(at: 4), .weak)
+        XCTAssertEqual(plan.beatInBar(at: 0), 0)
+        XCTAssertNil(plan.beatInBar(at: 1))
+        XCTAssertEqual(plan.beatInBar(at: 3), 1)
+    }
+
+    /// A muted beat in a section is expanded as a silent click (`.muted`) — the engine emits no sound for
+    /// it — while still occupying its grid slot so the count/visual advance.
+    func testMutedBeatInSectionExpandsAsSilentClick() {
+        let sr = 48_000.0
+        let section = SongSection(name: "Mute", tempoBPM: 120, timeSignature: .common,
+                                  subdivision: .quarter,
+                                  accentPattern: [.strong, .normal, .muted, .normal], bars: 1)
+        let plan = SongPlan(song: Song(name: "M", sections: [section]), sampleRate: sr)
+        XCTAssertEqual(plan.clickCount, 4)                       // the muted beat still occupies a slot
+        XCTAssertEqual(plan.accent(at: 0), .strong)
+        XCTAssertEqual(plan.accent(at: 2), .muted)               // silent, but present
+        XCTAssertEqual(plan.beatInBar(at: 2), 2)                 // …and still counts as beat 3
     }
 
     // MARK: - Degenerate inputs

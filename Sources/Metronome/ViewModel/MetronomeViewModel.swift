@@ -36,7 +36,7 @@ final class MetronomeViewModel: ObservableObject {
     var bpm: Double { config.bpm }
     var timeSignature: TimeSignature { config.timeSignature }
     var subdivision: Subdivision { config.subdivision }
-    var accents: [Bool] { config.accents }
+    var accents: [BeatAccent] { config.accents }
     var sound: MetronomeSound { config.sound }
 
     init(config: MetronomeConfiguration = MetronomeConfiguration(),
@@ -109,24 +109,50 @@ final class MetronomeViewModel: ObservableObject {
     }
 
     func setNumerator(_ numerator: Int) {
-        updateConfig {
-            let ts = TimeSignature(numerator: numerator, denominator: $0.timeSignature.denominator)
-            $0.timeSignature = ts
-            $0.accents = ts.defaultAccents   // adopt the new meter's sensible pattern (compound-aware)
+        updateConfig { config in
+            let ts = TimeSignature(numerator: numerator, denominator: config.timeSignature.denominator)
+            Self.applyMeter(ts, to: &config)
         }
     }
 
     func setDenominator(_ denominator: Int) {
-        updateConfig {
-            let ts = TimeSignature(numerator: $0.timeSignature.numerator, denominator: denominator)
-            $0.timeSignature = ts
-            $0.accents = ts.defaultAccents   // e.g. 6/4 → 6/8 switches to dotted-quarter group accents
+        updateConfig { config in
+            let ts = TimeSignature(numerator: config.timeSignature.numerator, denominator: denominator)
+            Self.applyMeter(ts, to: &config)
         }
     }
 
-    func toggleAccent(_ index: Int) {
+    /// Applies a new meter: adopts its sensible default accents (compound-aware) and, on a simple↔compound
+    /// switch, resets the subdivision to the main beat so a simple-meter subdivision isn't misread as a
+    /// compound one (e.g. 4/4 eighths shouldn't carry over as 6/8 "eighths" = a triplet division).
+    private static func applyMeter(_ ts: TimeSignature, to config: inout MetronomeConfiguration) {
+        let compoundChanged = ts.isCompound != config.timeSignature.isCompound
+        config.timeSignature = ts
+        config.accents = ts.defaultAccents
+        if compoundChanged { config.subdivision = .quarter }
+    }
+
+    /// Cycles beat `index` to its next accent state (strong → medium → normal → muted → strong).
+    func cycleAccent(_ index: Int) {
         updateConfig {
-            if $0.accents.indices.contains(index) { $0.accents[index].toggle() }
+            if $0.accents.indices.contains(index) { $0.accents[index] = $0.accents[index].next }
+        }
+    }
+
+    /// Applies a beat grouping (e.g. 2+2+3) to the current meter: beat 1 becomes a strong accent, each
+    /// subsequent group head a medium (secondary) accent, and every other beat normal. Used by the meter
+    /// UI's quick grouping presets for asymmetric meters.
+    func applyGrouping(_ groups: [Int]) {
+        updateConfig {
+            var pattern = [BeatAccent](repeating: .normal, count: $0.beatsPerBar)
+            guard !pattern.isEmpty else { return }
+            pattern[0] = .strong
+            var index = 0
+            for size in groups where size > 0 {
+                if index > 0 && index < pattern.count { pattern[index] = .medium }
+                index += size
+            }
+            $0.accents = pattern
         }
     }
 
@@ -176,7 +202,7 @@ final class MetronomeViewModel: ObservableObject {
     /// The immutable snapshot the selected beat indicator renders from — built from the polled pulse and
     /// the current configuration, so every indicator style stays synced to the audio.
     var visualState: BeatVisualState {
-        BeatVisualState(beatsPerMeasure: timeSignature.numerator,
+        BeatVisualState(beatsPerMeasure: config.beatsPerBar,
                         ticksPerBeat: config.ticksPerBeat,
                         accents: accents,
                         currentBeat: isPlaying ? displayBeat : nil,

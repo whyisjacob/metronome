@@ -42,16 +42,18 @@ final class OfflineRenderAccuracyTests: XCTestCase {
     }
 
     func testOnsetsMatchFirstPrinciplesGridWithZeroDrift() throws {
-        // ≥3 tempos (40 / 120 / 208) and several time-signature × subdivision combinations, including
-        // odd/compound meters and every subdivision (32nds included). The fastest inter-onset interval
-        // here is 208 BPM sixteenths ≈ 72 ms, comfortably longer than the 18 ms detection guard below;
-        // the 100 BPM 32nds ≈ 75 ms are next-fastest, still well clear of the guard.
+        // ≥3 tempos (40 / 120 / 208) and several time-signature × subdivision combinations, including an
+        // odd meter (7/8) and every subdivision (32nds included). These are all SIMPLE meters, so the
+        // subdivision's musical ticks-per-beat (hard-coded below) is the grid; compound meters have their
+        // own dotted-quarter accuracy test (`testCompoundMetersInTwoOnDottedQuarterGridAreDriftFree`).
+        // The fastest inter-onset interval here is 208 BPM sixteenths ≈ 72 ms, comfortably longer than the
+        // 18 ms detection guard below; the 100 BPM 32nds ≈ 75 ms are next-fastest, still well clear.
         let cases: [Case] = [
             Case(bpm: 40,  numerator: 4, denominator: 4, subdivision: .quarter,      ticksPerBeat: 1),
             Case(bpm: 120, numerator: 4, denominator: 4, subdivision: .quarter,      ticksPerBeat: 1),
             Case(bpm: 208, numerator: 4, denominator: 4, subdivision: .quarter,      ticksPerBeat: 1),
             Case(bpm: 120, numerator: 3, denominator: 4, subdivision: .eighth,       ticksPerBeat: 2),
-            Case(bpm: 90,  numerator: 6, denominator: 8, subdivision: .sixteenth,    ticksPerBeat: 4),
+            Case(bpm: 90,  numerator: 3, denominator: 8, subdivision: .sixteenth,    ticksPerBeat: 4),
             Case(bpm: 144, numerator: 7, denominator: 8, subdivision: .triplet,      ticksPerBeat: 3),
             Case(bpm: 208, numerator: 4, denominator: 4, subdivision: .sixteenth,    ticksPerBeat: 4),
             // 32nd note (ticksPerBeat = 8) — the new subdivision, held to the same independent grid.
@@ -139,7 +141,10 @@ final class OfflineRenderAccuracyTests: XCTestCase {
     /// the engine); the numerator's job is proven separately by checking the accented (louder) onsets land
     /// on every numerator-th beat. This is the same independent discipline as the grid test above.
     func testOddCustomNumeratorsAreDriftFreeWithDefaultDownbeatAccent() throws {
-        for numerator in [5, 11] {
+        // 11 and 13 are large arbitrary numerators with no conventional subgrouping, so their default is a
+        // single strong downbeat (no secondary accents) — which is what the "only beat 1 accented" check
+        // relies on. (Asymmetric groupings like 5 and 7 are proven separately in ClickMathTests.)
+        for numerator in [11, 13] {
             let bpm = 132.0
             let secondsPerBeat = 60.0 / bpm            // quarter note → 1 tick/beat
             let framesPerBeat  = secondsPerBeat * sampleRate
@@ -150,11 +155,13 @@ final class OfflineRenderAccuracyTests: XCTestCase {
                 subdivision: .quarter
             )
             // The arbitrary numerator is preserved (it was capped at 16 before) and the default accent
-            // pattern marks only beat 1 — the fact the engine must honour for an odd meter.
+            // pattern marks only beat 1 (strong) — the fact the engine must honour for such a meter.
             XCTAssertEqual(config.timeSignature.numerator, numerator, "numerator \(numerator) must not be clamped")
-            XCTAssertEqual(config.accents.first, true)
-            XCTAssertFalse(config.accents.dropFirst().contains(true),
+            XCTAssertEqual(config.accents.first, .strong)
+            XCTAssertFalse(config.accents.dropFirst().contains(.strong),
                            "default pattern must accent only beat 1 for \(numerator)/4")
+            XCTAssertFalse(config.accents.contains(.medium),
+                           "a single-group meter has no secondary accents for \(numerator)/4")
 
             let engine = MetronomeEngine()
             try engine.prepareForOfflineRendering(sampleRate: sampleRate)
@@ -201,64 +208,182 @@ final class OfflineRenderAccuracyTests: XCTestCase {
         }
     }
 
-    /// Compound meters (6/8, 9/8, 12/8) render drift-free on the same independent grid AND accent the
-    /// dotted-quarter **group heads** (beats 1, 4, 7, 10) by default. The oracle is first-principles only:
-    /// with the base (quarter) subdivision each meter pulses `numerator` times per bar, so onset `k` is
-    /// `round(k · 60/BPM · sampleRate)` (1 tick/beat hard-coded, not read from the engine). The grouping's
-    /// job is proven by checking every group head renders louder than the inner pulse that follows it.
-    func testCompoundMetersGroupHeadAccentsAreDriftFree() throws {
+    /// **Compound meters, felt in 2/3/4 on the dotted-quarter grid** — the fix for the old "pulse the
+    /// eighth, BPM == eighth rate" bug (which made "120" in 6/8 mean ♩.=40 and put real jig tempos out of
+    /// reach). The convention: in 6/8, 9/8, 12/8 the beat is a *dotted quarter*, the user BPM is that
+    /// beat's rate, and by default only the main beats click.
+    ///
+    /// The oracle is first-principles only: a dotted-quarter beat lasts `60 / BPM` seconds — a fact of the
+    /// convention, **hard-coded here, never read from the engine/config** — so main beat `k` is due at
+    /// `round(k · 60/BPM · sampleRate)` and a bar has exactly `numerator/3` beats. Rendered at a real jig
+    /// tempo (138 dotted-quarter), the audio must land on that grid, drift-free, with `numerator/3` clicks
+    /// per bar. Had the engine kept treating BPM as the eighth rate, the spacing would be 3× too small and
+    /// the count 3× too high — this test fails hard on that bug.
+    func testCompoundMetersInTwoOnDottedQuarterGridAreDriftFree() throws {
         for numerator in [6, 9, 12] {
-            let bpm = 132.0
-            let secondsPerBeat = 60.0 / bpm            // one eighth-pulse per beat tick
-            let framesPerBeat  = secondsPerBeat * sampleRate
+            let mainBeats = numerator / 3
+            let bpm = 138.0                                    // a real jig tempo, as the dotted-quarter rate
+            let secondsPerDottedQuarter = 60.0 / bpm           // first principles: the compound beat's length
+            let framesPerBeat = secondsPerDottedQuarter * sampleRate
 
             let config = MetronomeConfiguration(
                 bpm: bpm,
                 timeSignature: TimeSignature(numerator: numerator, denominator: 8),
-                subdivision: .quarter
+                subdivision: .quarter                          // main-beat only ("felt in 2 / 3 / 4")
             )
-            // The default accent pattern must mark exactly the group heads (every third beat).
-            var expectedAccents = [Bool](repeating: false, count: numerator)
-            for i in stride(from: 0, to: numerator, by: 3) { expectedAccents[i] = true }
-            XCTAssertEqual(config.accents, expectedAccents,
-                           "compound \(numerator)/8 must default to group-head accents")
-
             let engine = MetronomeEngine()
             try engine.prepareForOfflineRendering(sampleRate: sampleRate)
             defer { engine.teardownOfflineRendering() }
 
-            let bars = 2
-            let seconds = Double(bars * numerator) * secondsPerBeat + 0.25
+            let bars = 3
+            let seconds = Double(bars * mainBeats) * secondsPerDottedQuarter + 0.25
             let samples = try engine.renderOffline(config: config, seconds: seconds)
 
             let minGap = Int(0.018 * sampleRate)
             let onsets = Self.detectOnsets(in: samples, minGap: minGap)
-            XCTAssertGreaterThanOrEqual(onsets.count, bars * numerator,
-                "expected ≥ \(bars * numerator) pulses for \(numerator)/8, got \(onsets.count)")
-
+            XCTAssertGreaterThan(onsets.count, 2, "too few onsets for \(numerator)/8")
             let base = onsets[0]
             XCTAssertLessThanOrEqual(base, 1, "playback must begin on sample 0 for \(numerator)/8")
 
-            // (A) ZERO CUMULATIVE DRIFT on the independent pulse grid.
-            let comparable = min(onsets.count, bars * numerator)
+            // (A) COUNT: exactly `numerator/3` main beats per bar — the "in 2 / in 3 / in 4" feel, at the
+            //     dotted-quarter rate (NOT the eighth rate).
+            let expected = bars * mainBeats
+            XCTAssertLessThanOrEqual(abs(onsets.count - expected), 1,
+                "compound \(numerator)/8 must click \(mainBeats) main beats/bar; got \(onsets.count) vs \(expected)")
+
+            // (B) ZERO CUMULATIVE DRIFT on the independent dotted-quarter grid — last beat as tight as first.
+            let comparable = min(onsets.count, expected)
+            XCTAssertGreaterThan(comparable, 2)
             for k in 0..<comparable {
                 let idealContinuous = Double(k) * framesPerBeat
                 let measured = Double(onsets[k] - base)
                 XCTAssertLessThan(abs(measured - idealContinuous), 1.0,
-                    "compound \(numerator)/8 onset \(k) drifted: measured \(measured), ideal \(idealContinuous)")
+                    "compound \(numerator)/8 main beat \(k) drifted: measured \(measured), ideal \(idealContinuous)")
             }
 
-            // (B) GROUP HEADS are accented: each of beats 0, 3, 6, 9 renders louder than the next pulse.
+            // (C) The bar downbeat (strong) is louder than the following main beat (a medium group head).
             func peak(at frame: Int) -> Float {
                 let end = min(frame + 512, samples.count)
                 var p: Float = 0
                 for i in frame..<end { p = max(p, abs(samples[i])) }
                 return p
             }
-            for head in stride(from: 0, to: comparable - 1, by: 3) {
-                XCTAssertGreaterThan(peak(at: onsets[head]), peak(at: onsets[head + 1]),
-                    "compound \(numerator)/8 group head at beat \(head) must be accented (louder)")
+            if comparable >= 2 {
+                XCTAssertGreaterThan(peak(at: onsets[0]), peak(at: onsets[1]),
+                    "compound \(numerator)/8 downbeat (strong) must be louder than the next main beat (medium)")
             }
+        }
+    }
+
+    /// **Compound meters with the eighth pulse.** Turning the eighth subdivision on divides each dotted
+    /// quarter into three — the defining compound pulse. Independent oracle: an eighth lasts `(60/BPM)/3`
+    /// seconds (a dotted quarter split in three — first principles), so onset `k` is due at
+    /// `round(k · (60/BPM)/3 · sampleRate)`, there are `numerator` eighths per bar, and **every third**
+    /// onset is a main beat that must also land on the dotted-quarter grid `round(m · 60/BPM · sampleRate)`.
+    /// This proves the audit's "internal eighth rate = main-beat BPM × 3", and the group-head accents.
+    func testCompoundMeterEighthPulseIsThreePerDottedQuarterAndDriftFree() throws {
+        let numerator = 6
+        let bpm = 132.0
+        let secondsPerEighth = (60.0 / bpm) / 3.0              // first principles: dotted quarter ÷ 3
+        let framesPerEighth = secondsPerEighth * sampleRate
+        let framesPerDottedQuarter = (60.0 / bpm) * sampleRate
+
+        let config = MetronomeConfiguration(
+            bpm: bpm,
+            timeSignature: TimeSignature(numerator: numerator, denominator: 8),
+            subdivision: .eighth
+        )
+        let engine = MetronomeEngine()
+        try engine.prepareForOfflineRendering(sampleRate: sampleRate)
+        defer { engine.teardownOfflineRendering() }
+
+        let bars = 3
+        let seconds = Double(bars * numerator) * secondsPerEighth + 0.25
+        let samples = try engine.renderOffline(config: config, seconds: seconds)
+
+        let onsets = Self.detectOnsets(in: samples, minGap: Int(0.018 * sampleRate))
+        XCTAssertGreaterThan(onsets.count, 2)
+        let base = onsets[0]
+        XCTAssertLessThanOrEqual(base, 1, "playback must begin on sample 0")
+
+        // (A) COUNT: `numerator` eighths per bar (6 for 6/8) — 3 per dotted-quarter beat.
+        let expected = bars * numerator
+        XCTAssertLessThanOrEqual(abs(onsets.count - expected), 1,
+            "compound eighth pulse must be \(numerator)/bar; got \(onsets.count) vs \(expected)")
+
+        // (B) ZERO DRIFT on the eighth grid, AND every third onset (a main beat) sits on the independent
+        //     dotted-quarter grid.
+        let comparable = min(onsets.count, expected)
+        for k in 0..<comparable {
+            let measured = Double(onsets[k] - base)
+            XCTAssertLessThan(abs(measured - Double(k) * framesPerEighth), 1.0,
+                "compound eighth \(k) drifted: measured \(measured)")
+            if k % 3 == 0 {
+                let mainBeatIdeal = Double(k / 3) * framesPerDottedQuarter
+                XCTAssertLessThan(abs(measured - mainBeatIdeal), 1.0,
+                    "compound main beat \(k / 3) off the dotted-quarter grid: measured \(measured), ideal \(mainBeatIdeal)")
+            }
+        }
+
+        // (C) GROUP HEADS louder than inner eighths: each main beat (every 3rd onset) outweighs the eighth
+        //     right after it.
+        func peak(at frame: Int) -> Float {
+            let end = min(frame + 512, samples.count)
+            var p: Float = 0
+            for i in frame..<end { p = max(p, abs(samples[i])) }
+            return p
+        }
+        for head in stride(from: 0, to: comparable - 1, by: 3) {
+            XCTAssertGreaterThan(peak(at: onsets[head]), peak(at: onsets[head + 1]),
+                "compound group head at eighth \(head) must be louder than the following inner eighth")
+        }
+    }
+
+    /// **Per-beat mute (item 4): a muted beat is silent, but the grid is unbroken.** Mute beat 3 of 4/4 and
+    /// render: beats 1, 2 and 4 of every bar sound on the independent quarter-note grid, beat 3 is silent,
+    /// and muting shifts nothing (the surviving onsets keep their exact grid frames).
+    func testMutedBeatIsSilentButGridIsUnbroken() throws {
+        let bpm = 120.0
+        let framesPerBeat = (60.0 / bpm) * sampleRate
+        let config = MetronomeConfiguration(
+            bpm: bpm, timeSignature: .common, subdivision: .quarter,
+            accents: [.strong, .normal, .muted, .normal])          // beat 3 (index 2) muted
+
+        let engine = MetronomeEngine()
+        try engine.prepareForOfflineRendering(sampleRate: sampleRate)
+        defer { engine.teardownOfflineRendering() }
+
+        let bars = 3
+        let seconds = Double(bars * 4) * (60.0 / bpm) + 0.25
+        let samples = try engine.renderOffline(config: config, seconds: seconds)
+        let onsets = Self.detectOnsets(in: samples, minGap: Int(0.018 * sampleRate))
+        XCTAssertGreaterThan(onsets.count, 4, "some beats must still sound")
+
+        // Every surviving onset sits on the quarter grid at a non-muted slot (0, 1 or 3 — never slot 2),
+        // and exactly on its grid frame (muting must not shift timing).
+        let base = onsets[0]
+        for onset in onsets {
+            let n = Int((Double(onset - base) / framesPerBeat).rounded())
+            XCTAssertNotEqual(n % 4, 2, "beat 3 (slot 2) must never sound — it is muted")
+            XCTAssertLessThan(abs(Double(onset - base) - Double(n) * framesPerBeat), 2.0,
+                "a surviving onset drifted off the quarter grid — muting must not shift timing")
+        }
+
+        // Directly confirm silence at each muted beat 3 while its neighbours (beats 2 and 4) still sound.
+        func peakNear(_ frame: Int) -> Float {
+            let start = max(0, frame - 32), end = min(frame + 400, samples.count)
+            var p: Float = 0
+            var i = start
+            while i < end { p = max(p, abs(samples[i])); i += 1 }
+            return p
+        }
+        for bar in 0..<bars {
+            XCTAssertLessThan(peakNear(Int(Double(bar * 4 + 2) * framesPerBeat)), 0.05,
+                "beat 3 of bar \(bar) must be silent (muted)")
+            XCTAssertGreaterThan(peakNear(Int(Double(bar * 4 + 1) * framesPerBeat)), 0.05,
+                "beat 2 of bar \(bar) should still sound")
+            XCTAssertGreaterThan(peakNear(Int(Double(bar * 4 + 3) * framesPerBeat)), 0.05,
+                "beat 4 of bar \(bar) should still sound")
         }
     }
 

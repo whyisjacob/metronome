@@ -67,32 +67,61 @@ enum ClickSoundFactory {
 
     /// The voice set for a sound. `.voice` has no click timbre of its own — it falls back to the classic
     /// click for subdivision ticks and while its spoken buffers are still rendering.
+    ///
+    /// A `.medium` (secondary-accent) spec is derived automatically as the mid-point between the sound's
+    /// `.strong` and `.normal` specs, so every timbre gains a distinct in-between click with no per-sound
+    /// tuning — and, crucially, without disturbing the `.strong`/`.normal`/`.weak` specs the accuracy
+    /// tests render against.
     static func specs(for sound: MetronomeSound) -> [AccentLevel: Spec] {
+        let base: [AccentLevel: Spec]
         switch sound {
-        case .classic, .voice: return defaultSpecs
-        case .woodblock:       return woodblockSpecs
-        case .beep:            return beepSpecs
-        case .rimshot:         return rimshotSpecs
-        case .cowbell:         return cowbellSpecs
+        case .classic, .voice: base = defaultSpecs
+        case .woodblock:       base = woodblockSpecs
+        case .beep:            base = beepSpecs
+        case .rimshot:         base = rimshotSpecs
+        case .cowbell:         base = cowbellSpecs
         }
+        var withMedium = base
+        if let s = base[.strong], let n = base[.normal] {
+            withMedium[.medium] = mediumSpec(strong: s, normal: n)
+        }
+        return withMedium
+    }
+
+    /// The secondary-accent voice: field-wise mid-point between the strong and normal specs. Its timbre
+    /// (partial ratio, square, noise) follows `normal` so it shares the sound's character; only the
+    /// magnitude/brightness sit between the two, giving a clearly audible in-between click.
+    static func mediumSpec(strong s: Spec, normal n: Spec) -> Spec {
+        func mid(_ a: Double, _ b: Double) -> Double { (a + b) / 2 }
+        return Spec(frequency: mid(s.frequency, n.frequency),
+                    durationSeconds: mid(s.durationSeconds, n.durationSeconds),
+                    gain: mid(s.gain, n.gain),
+                    decayDB: mid(s.decayDB, n.decayDB),
+                    partialRatio: n.partialRatio,
+                    partialGain: mid(s.partialGain, n.partialGain),
+                    noiseGain: mid(s.noiseGain, n.noiseGain),
+                    square: n.square)
     }
 
     // MARK: - Table building
 
     /// Builds one click buffer per `AccentLevel` for `sound`, indexed by `AccentLevel.rawValue`
-    /// (0 = strong, 1 = normal, 2 = weak). Generated once per sample rate / sound and then treated as
-    /// immutable, so the audio thread can read it lock-free.
+    /// (0 = strong, 1 = normal, 2 = weak, 3 = medium, 4 = muted). Generated once per sample rate / sound
+    /// and then treated as immutable, so the audio thread can read it lock-free.
     static func makeClickTable(sampleRate: Double, sound: MetronomeSound = .classic) -> [[Float]] {
         makeClickTable(sampleRate: sampleRate, specs: specs(for: sound))
     }
 
-    /// Builds a click table from an explicit spec set.
+    /// Builds a click table from an explicit spec set. The `.muted` slot is intentionally an **empty**
+    /// buffer — the engine never triggers it (it suppresses the click for a muted beat) — so it costs
+    /// nothing and can never make a sound.
     static func makeClickTable(sampleRate: Double,
                                specs: [AccentLevel: Spec]) -> [[Float]] {
         AccentLevel.allCases
             .sorted { $0.rawValue < $1.rawValue }
             .map { level in
-                renderClick(specs[level] ?? defaultSpecs[.normal]!, sampleRate: sampleRate)
+                guard level != .muted else { return [] }
+                return renderClick(specs[level] ?? defaultSpecs[.normal]!, sampleRate: sampleRate)
             }
     }
 

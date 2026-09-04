@@ -28,8 +28,10 @@ final class ClickMathTests: XCTestCase {
     }
 
     func testAccentNormalizationDefaultsDownbeat() {
+        // 4/4 defaults to a strong downbeat and a secondary (medium) accent on beat 3 — the familiar 2+2
+        // grouping — with the other beats normal.
         let c = MetronomeConfiguration(timeSignature: TimeSignature(numerator: 4, denominator: 4))
-        XCTAssertEqual(c.accents, [true, false, false, false])
+        XCTAssertEqual(c.accents, [.strong, .normal, .medium, .normal])
     }
 
     func testAccentNormalizationResizes() {
@@ -106,9 +108,10 @@ final class ClickMathTests: XCTestCase {
 
     func testAccentLevelsQuarter() {
         let c = MetronomeConfiguration(bpm: 120, timeSignature: .common, subdivision: .quarter)
-        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)   // beat 1 (accented downbeat)
+        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)   // beat 1 (strong downbeat)
         XCTAssertEqual(c.accentLevel(forTick: 1), .normal)   // beat 2
-        XCTAssertEqual(c.accentLevel(forTick: 2), .normal)   // beat 3
+        XCTAssertEqual(c.accentLevel(forTick: 2), .medium)   // beat 3 (secondary accent by default)
+        XCTAssertEqual(c.accentLevel(forTick: 3), .normal)   // beat 4
         XCTAssertEqual(c.accentLevel(forTick: 4), .strong)   // next bar downbeat
     }
 
@@ -146,32 +149,44 @@ final class ClickMathTests: XCTestCase {
     }
 
     func testCompoundMetersDefaultToGroupHeadAccents() {
-        // Group heads (beats 1, 4, 7, 10) accented by default for compound meters.
+        // Compound meters are felt in dotted-quarter beats: beat 1 strong, every later group head medium.
+        // The accent array is one entry per MAIN beat (2 for 6/8, 3 for 9/8, 4 for 12/8).
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 8)).accents,
-                       [true, false, false, true, false, false])
+                       [.strong, .medium])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 9, denominator: 8)).accents,
-                       [true, false, false, true, false, false, true, false, false])
+                       [.strong, .medium, .medium])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 12, denominator: 8)).accents,
-                       [true, false, false, true, false, false, true, false, false, true, false, false])
-        // Simple meters unchanged: only the downbeat. 6/4 is duple-simple, NOT compound.
-        XCTAssertEqual(MetronomeConfiguration(timeSignature: .common).accents, [true, false, false, false])
+                       [.strong, .medium, .medium, .medium])
+        // Simple meters: 4/4 keeps its 2+2 (strong, _, medium, _); 6/4 is duple-simple (downbeat only);
+        // 3/8 is a single group (downbeat only), NOT compound.
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: .common).accents,
+                       [.strong, .normal, .medium, .normal])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 4)).accents,
-                       [true, false, false, false, false, false])
+                       [.strong, .normal, .normal, .normal, .normal, .normal])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 3, denominator: 8)).accents,
-                       [true, false, false])
+                       [.strong, .normal, .normal])
     }
 
     func testCompoundAccentLevelsMarkGroupHeads() {
-        // 6/8 at the base pulse: strong on beats 1 & 4 (group heads), normal on the inner pulses.
+        // 6/8 felt in 2 (main-beat / quarter subdivision): two dotted-quarter beats, strong then medium.
         let c = MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 8),
                                        subdivision: .quarter)
-        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)   // group 1 head
-        XCTAssertEqual(c.accentLevel(forTick: 1), .normal)
-        XCTAssertEqual(c.accentLevel(forTick: 2), .normal)
-        XCTAssertEqual(c.accentLevel(forTick: 3), .strong)   // group 2 head
-        XCTAssertEqual(c.accentLevel(forTick: 4), .normal)
-        XCTAssertEqual(c.accentLevel(forTick: 5), .normal)
-        XCTAssertEqual(c.accentLevel(forTick: 6), .strong)   // next bar, group 1 head
+        XCTAssertEqual(c.ticksPerBeat, 1, "compound main-beat subdivision is one pulse per beat")
+        XCTAssertEqual(c.beatsPerBar, 2)
+        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)   // beat 1 (group 1 head)
+        XCTAssertEqual(c.accentLevel(forTick: 1), .medium)   // beat 2 (group 2 head)
+        XCTAssertEqual(c.accentLevel(forTick: 2), .strong)   // next bar, beat 1
+
+        // With the eighth pulse each dotted-quarter beat divides in three (the "1 trip let" feel): the two
+        // heads keep their strong/medium accents and the inner eighths are weak.
+        let e = MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 8),
+                                       subdivision: .eighth)
+        XCTAssertEqual(e.ticksPerBeat, 3, "a compound eighth pulse is 3 per dotted-quarter beat")
+        XCTAssertEqual(e.accentLevel(forTick: 0), .strong)   // beat 1
+        XCTAssertEqual(e.accentLevel(forTick: 1), .weak)     // inner eighth
+        XCTAssertEqual(e.accentLevel(forTick: 2), .weak)     // inner eighth
+        XCTAssertEqual(e.accentLevel(forTick: 3), .medium)   // beat 2 head
+        XCTAssertEqual(e.beatIndex(forTick: 3), 1)
     }
 
     // MARK: - Voice counting map (which spoken token lands on which tick — pure, no audio)
@@ -223,19 +238,82 @@ final class ClickMathTests: XCTestCase {
     }
 
     func testVoiceTokenCompoundCountsInGroups() {
-        // 6/8 felt in 2: "1 trip let 2 trip let" — group heads speak the group ordinal, inner pulses the
-        // triplet syllables, so the count reflects the dotted-quarter grouping.
-        let p = plan(120, TimeSignature(numerator: 6, denominator: 8), .quarter)
-        XCTAssertEqual(p.voiceToken(forTick: 0), .number(0))          // "one"  (group 1 head)
+        // 6/8 with the eighth pulse: each dotted-quarter beat divides in three, counted "1 trip let 2 …" —
+        // the beat speaks its ordinal, the inner eighths speak the triplet syllables.
+        let p = plan(120, TimeSignature(numerator: 6, denominator: 8), .eighth)
+        XCTAssertEqual(p.voiceToken(forTick: 0), .number(0))          // "one"  (beat 1)
         XCTAssertEqual(p.voiceToken(forTick: 1), .syllable(.trip))
         XCTAssertEqual(p.voiceToken(forTick: 2), .syllable(.letSub))
-        XCTAssertEqual(p.voiceToken(forTick: 3), .number(1))          // "two"  (group 2 head)
+        XCTAssertEqual(p.voiceToken(forTick: 3), .number(1))          // "two"  (beat 2)
         XCTAssertEqual(p.voiceToken(forTick: 4), .syllable(.trip))
         XCTAssertEqual(p.voiceToken(forTick: 5), .syllable(.letSub))
         XCTAssertEqual(p.voiceToken(forTick: 6), .number(0))          // next bar → "one"
 
-        // 12/8 → four groups counted "1 … 2 … 3 … 4 …".
-        let q = plan(120, TimeSignature(numerator: 12, denominator: 8), .quarter)
-        XCTAssertEqual(q.voiceToken(forTick: 9), .number(3))          // "four" (group 4 head)
+        // 12/8 → four dotted-quarter beats counted "1 … 2 … 3 … 4 …".
+        let q = plan(120, TimeSignature(numerator: 12, denominator: 8), .eighth)
+        XCTAssertEqual(q.voiceToken(forTick: 9), .number(3))          // "four" (beat 4)
+    }
+
+    // MARK: - Asymmetric-meter default groupings (item 2)
+
+    func testAsymmetricMeterDefaultGroupings() {
+        // 5/8 → 2+3: strong on beat 1, medium (secondary) on beat 3.
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 5, denominator: 8)).accents,
+                       [.strong, .normal, .medium, .normal, .normal])
+        // 7/8 → 2+2+3: accents on beats 1, 3, 5.
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 7, denominator: 8)).accents,
+                       [.strong, .normal, .medium, .normal, .medium, .normal, .normal])
+        // 5/4 → 3+2: accents on beats 1, 4.
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 5, denominator: 4)).accents,
+                       [.strong, .normal, .normal, .medium, .normal])
+    }
+
+    // MARK: - Secondary accent level (item 3)
+
+    func testSecondaryAccentLevelIsAudiblyBetweenStrongAndNormal() {
+        let c = MetronomeConfiguration(timeSignature: .common, subdivision: .quarter,
+                                       accents: [.strong, .medium, .normal, .muted])
+        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)
+        XCTAssertEqual(c.accentLevel(forTick: 1), .medium)
+        XCTAssertEqual(c.accentLevel(forTick: 2), .normal)
+
+        // The medium click's peak amplitude sits strictly between strong and normal (and above weak), so
+        // it is an audibly distinct in-between loudness — proven from the generated buffer, not asserted.
+        let table = ClickSoundFactory.makeClickTable(sampleRate: 44_100, sound: .classic)
+        func peak(_ level: AccentLevel) -> Float { table[level.rawValue].map { abs($0) }.max() ?? 0 }
+        XCTAssertGreaterThan(peak(.strong), peak(.medium))
+        XCTAssertGreaterThan(peak(.medium), peak(.normal))
+        XCTAssertGreaterThan(peak(.normal), peak(.weak))
+        XCTAssertTrue(table[AccentLevel.muted.rawValue].isEmpty, "the muted slot is a silent (empty) buffer")
+    }
+
+    // MARK: - Per-beat mute (item 4)
+
+    func testMutedBeatIsSilentButStillCounts() {
+        // Mute beat 3 of 4/4 with an eighth subdivision: the muted beat AND its inner eighth are silent,
+        // yet the beat still reports its index so the count/visual advance.
+        let c = MetronomeConfiguration(bpm: 120, timeSignature: .common, subdivision: .eighth,
+                                       accents: [.strong, .normal, .muted, .normal])
+        XCTAssertEqual(c.accentLevel(forTick: 4), .muted)   // beat 3 on-beat: silent
+        XCTAssertEqual(c.accentLevel(forTick: 5), .muted)   // its subdivision: also silent
+        XCTAssertEqual(c.beatIndex(forTick: 4), 2)          // …but the beat still counts
+        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)  // other beats unaffected
+        XCTAssertEqual(c.accentLevel(forTick: 6), .normal)
+    }
+
+    func testNormalizeAllowsAllMutedButPromotesAllNormalDownbeat() {
+        // An all-normal pattern promotes the downbeat to strong (never accent-less by omission)…
+        XCTAssertEqual(MetronomeConfiguration.normalizedAccents([.normal, .normal, .normal], count: 3),
+                       [.strong, .normal, .normal])
+        // …but an explicit all-muted pattern is respected (a deliberately silent bar is allowed).
+        XCTAssertEqual(MetronomeConfiguration.normalizedAccents([.muted, .muted], count: 2),
+                       [.muted, .muted])
+    }
+
+    func testAccentCycleOrderStrongMediumNormalMuted() {
+        XCTAssertEqual(BeatAccent.strong.next, .medium)
+        XCTAssertEqual(BeatAccent.medium.next, .normal)
+        XCTAssertEqual(BeatAccent.normal.next, .muted)
+        XCTAssertEqual(BeatAccent.muted.next, .strong)
     }
 }

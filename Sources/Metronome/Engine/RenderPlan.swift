@@ -9,21 +9,20 @@ import Foundation
 /// value proven correct by the pure-math unit tests is the exact value the audio render path uses.
 final class RenderPlan {
     let ticksPerBeat: Int
-    let numerator: Int
-    let accents: [Bool]
+    /// Main beats (pulses) per bar — `timeSignature.beatsPerBar` (2 for 6/8, etc.). Named `beatsPerBar`,
+    /// not `numerator`, because a compound meter pulses on its dotted-quarter beats, not its eighths.
+    let beatsPerBar: Int
+    let accents: [BeatAccent]
     let sampleRate: Double
     /// Frames between consecutive clicks: `secondsPerTick × sampleRate`. May be fractional.
     let framesPerTick: Double
-    /// Whether the meter is compound (6/8, 9/8, 12/8): affects Voice counting, not timing.
-    let isCompound: Bool
 
     init(config: MetronomeConfiguration, sampleRate: Double) {
         self.ticksPerBeat = config.ticksPerBeat
-        self.numerator = config.timeSignature.numerator
+        self.beatsPerBar = config.beatsPerBar
         self.accents = config.accents
         self.sampleRate = sampleRate
         self.framesPerTick = config.secondsPerTick * sampleRate
-        self.isCompound = config.timeSignature.isCompound
     }
 
     /// Absolute frame index (from playback start) of tick `n` — closed form, zero cumulative drift.
@@ -32,19 +31,22 @@ final class RenderPlan {
         Int((Double(n) * framesPerTick).rounded())
     }
 
-    /// Emphasis of tick `n` (global tick index from playback start).
+    /// Emphasis of tick `n` (global tick index from playback start). A muted beat silences its whole span
+    /// (on-beat click and its subdivisions); the engine still publishes the pulse for it.
     @inline(__always)
     func accentLevel(forTick n: Int) -> AccentLevel {
+        let beat = (n / ticksPerBeat) % beatsPerBar
+        let beatAccent = accents.indices.contains(beat) ? accents[beat] : .normal
+        if beatAccent == .muted { return .muted }
         guard n % ticksPerBeat == 0 else { return .weak }
-        let beat = (n / ticksPerBeat) % numerator
-        return (accents.indices.contains(beat) && accents[beat]) ? .strong : .normal
+        return beatAccent.audioLevel
     }
 
     /// Beat index within the bar for tick `n`, or `nil` if `n` is a subdivision click.
     @inline(__always)
     func beatIndex(forTick n: Int) -> Int? {
         guard n % ticksPerBeat == 0 else { return nil }
-        return (n / ticksPerBeat) % numerator
+        return (n / ticksPerBeat) % beatsPerBar
     }
 
     /// The Voice token for tick `n` (global tick from playback start) — which spoken number or syllable
@@ -52,24 +54,18 @@ final class RenderPlan {
     ///   * eighths    → "1 and 2 and …"
     ///   * sixteenths → "1 e and a 2 e and a …"
     ///   * triplets   → "1 trip let 2 trip let …"
-    ///   * compound meters (6/8, 9/8, 12/8) at the base pulse → each dotted-quarter group is felt like a
-    ///     triplet: the group head speaks its ordinal ("1", "2", …) and the two inner pulses speak
-    ///     "trip"/"let", so the count reflects the grouping.
+    ///   * compound meters (6/8, 9/8, 12/8) with the eighth pulse → each dotted-quarter beat divides in
+    ///     three, so this is exactly the triplet case: the beat speaks its ordinal ("1", "2", …) and the
+    ///     two inner eighths speak "trip"/"let". (With the main-beat-only subdivision it just counts the
+    ///     beats "1 2 …".) No special-casing is needed — the compound-aware `ticksPerBeat`/`beatsPerBar`
+    ///     make the generic rules below produce the right count.
     ///   * 32nds and any unmapped subdivision → the beat speaks its number; the in-between ticks click.
     @inline(__always)
     func voiceToken(forTick n: Int) -> VoiceToken {
         let tpb = ticksPerBeat
         let posInBeat = n % tpb
         if posInBeat == 0 {
-            let beat = (n / tpb) % numerator
-            if isCompound && tpb == 1 {
-                // Compound felt in groups of three pulses (base/quarter subdivision).
-                switch beat % 3 {
-                case 0:  return .number(beat / 3)     // group head → the group's ordinal (0-based)
-                case 1:  return .syllable(.trip)
-                default: return .syllable(.letSub)
-                }
-            }
+            let beat = (n / tpb) % beatsPerBar
             return .number(beat)
         }
         switch tpb {

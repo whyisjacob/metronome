@@ -8,8 +8,8 @@ struct BeatVisualState: Equatable {
     var beatsPerMeasure: Int
     /// Subdivision clicks per beat (1 quarter, 2 eighth, 3 triplet, 4 sixteenth, 8 = 32nd).
     var ticksPerBeat: Int
-    /// Per-beat accent flags (`count == beatsPerMeasure`); `true` == accented.
-    var accents: [Bool]
+    /// Per-beat accent state (`count == beatsPerMeasure`).
+    var accents: [BeatAccent]
     /// The current beat (0-based), held *sticky* across the subdivision clicks between beats; `nil` idle.
     var currentBeat: Int?
     /// 0 on the beat itself, then 1…ticksPerBeat-1 as the subdivisions between this beat and the next
@@ -25,7 +25,7 @@ struct BeatVisualState: Equatable {
 
     /// An idle placeholder (nothing sounding).
     static func idle(beatsPerMeasure: Int = 4, ticksPerBeat: Int = 1,
-                     accents: [Bool] = [true, false, false, false]) -> BeatVisualState {
+                     accents: [BeatAccent] = [.strong, .normal, .normal, .normal]) -> BeatVisualState {
         BeatVisualState(beatsPerMeasure: beatsPerMeasure, ticksPerBeat: ticksPerBeat, accents: accents,
                         currentBeat: nil, subdivisionPhase: 0, accentLevel: .normal, flashID: 0,
                         isPlaying: false, isOnBeat: false)
@@ -40,8 +40,14 @@ struct BeatVisualState: Equatable {
         return min(previous + 1, max(ticksPerBeat - 1, 0))
     }
 
-    /// Whether beat `i`'s accent flag is set (bounds-safe).
-    func isAccented(_ i: Int) -> Bool { accents.indices.contains(i) && accents[i] }
+    /// The accent state of beat `i` (bounds-safe; `.normal` when out of range).
+    func accent(_ i: Int) -> BeatAccent { accents.indices.contains(i) ? accents[i] : .normal }
+
+    /// Whether beat `i` carries a primary or secondary accent (drives the emphasized dot size / colour).
+    func isAccented(_ i: Int) -> Bool { accent(i) == .strong || accent(i) == .medium }
+
+    /// Whether beat `i` is muted (shown dimmed/hollow — it advances but never sounds).
+    func isMuted(_ i: Int) -> Bool { accent(i) == .muted }
 }
 
 /// Renders whichever indicator the user selected. A thin switch so callers pass a style + state and stay
@@ -84,12 +90,19 @@ private struct BeatDotsRow: View {
 
     private func dot(_ i: Int) -> some View {
         Circle()
-            .fill(Theme.beatColor(isActive: activeBeat == i, accented: state.isAccented(i)))
+            .fill(Theme.beatColor(for: state.accent(i), isActive: activeBeat == i))
             .frame(width: size(i), height: size(i))
+            .opacity(state.isMuted(i) ? 0.5 : 1)
             .animation(.easeOut(duration: 0.08), value: activeBeat)
     }
 
-    private func size(_ i: Int) -> CGFloat { state.isAccented(i) ? 16 : 12 }
+    private func size(_ i: Int) -> CGFloat {
+        switch state.accent(i) {
+        case .strong:          return 16
+        case .medium:          return 14
+        case .normal, .muted:  return 12
+        }
+    }
 }
 
 /// A short row of pips for the subdivisions within one beat; pips up to the current subdivision phase are
@@ -152,8 +165,10 @@ private struct BallIndicator: View {
         guard state.isPlaying else { return Theme.surfaceRaised }
         switch state.accentLevel {
         case .strong: return Theme.accentStrong
+        case .medium: return Theme.accentMedium
         case .normal: return Theme.accentNormal
         case .weak:   return Theme.accentNormal.opacity(0.7)
+        case .muted:  return Theme.surfaceRaised
         }
     }
 
@@ -225,7 +240,7 @@ private struct CounterIndicator: View {
 
     private var numberColor: Color {
         guard state.isPlaying, let b = state.currentBeat else { return Theme.textSecondary }
-        return state.isAccented(b) ? Theme.accentStrong : Theme.accentNormal
+        return Theme.beatColor(for: state.accent(b), isActive: true)
     }
 }
 
@@ -315,6 +330,6 @@ private struct RingIndicator: View {
 
     private var centerColor: Color {
         guard state.isPlaying, let b = state.currentBeat else { return Theme.textSecondary }
-        return state.isAccented(b) ? Theme.accentStrong : Theme.accentNormal
+        return Theme.beatColor(for: state.accent(b), isActive: true)
     }
 }

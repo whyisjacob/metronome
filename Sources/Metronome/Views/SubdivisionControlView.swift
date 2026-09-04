@@ -1,24 +1,34 @@
 import SwiftUI
 
-/// Subdivision selector: quarter / eighth / triplet / sixteenth.
+/// Subdivision selector. In a simple meter: quarter / eighth / triplet / sixteenth / 32nd. In a compound
+/// meter (6/8, 9/8, 12/8) the beat is a dotted quarter, so the choices become the main beat, its eighths
+/// (the 3-per-beat compound pulse), and its sixteenths.
 struct SubdivisionControlView: View {
     @ObservedObject var viewModel: MetronomeViewModel
+
+    private var isCompound: Bool { viewModel.timeSignature.isCompound }
+    private var options: [Subdivision] { isCompound ? Subdivision.compoundCases : Subdivision.allCases }
 
     var body: some View {
         Card("Subdivision") {
             HStack(spacing: 8) {
-                ForEach(Subdivision.allCases) { option in
+                ForEach(options) { option in
                     Button(action: { viewModel.setSubdivision(option) }) {
                         VStack(spacing: 2) {
                             Text(option.symbol)
                                 .font(.system(size: 20, weight: .bold))
-                            Text(option.displayName)
+                            Text(isCompound ? option.compoundDisplayName : option.displayName)
                                 .font(.system(size: 11, weight: .semibold))
                         }
                         .frame(maxWidth: .infinity, minHeight: 52)
                     }
                     .buttonStyle(SelectableStyle(isOn: viewModel.subdivision == option))
                 }
+            }
+            if isCompound {
+                Text("Compound meter — felt in \(viewModel.timeSignature.beatsPerBar). Main beat clicks the dotted-quarter pulse; Eighths adds the 3-per-beat pulse.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
             }
         }
     }

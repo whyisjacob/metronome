@@ -45,6 +45,50 @@ struct MeterControlView: View {
                     .buttonStyle(SelectableStyle(isOn: viewModel.timeSignature.denominator == denom))
                 }
             }
+
+            // Quick accent groupings for asymmetric meters (e.g. 7/8 as 2+2+3 or 3+2+2). Each sets the
+            // downbeat strong and every subsequent group head to a secondary (medium) accent.
+            if !groupingPresets.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("GROUPING")
+                        .font(.system(size: 12, weight: .bold)).tracking(1.1)
+                        .foregroundStyle(Theme.textSecondary)
+                    HStack(spacing: 8) {
+                        ForEach(groupingPresets, id: \.self) { group in
+                            Button(action: { viewModel.applyGrouping(group) }) {
+                                Text(group.map(String.init).joined(separator: "+"))
+                                    .frame(maxWidth: .infinity, minHeight: 40)
+                            }
+                            .buttonStyle(SelectableStyle(isOn: viewModel.accents == Self.groupingAccents(group, beats: viewModel.accents.count)))
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    /// The grouping presets offered for the current (simple, asymmetric) meter, or none. Compound meters
+    /// are auto-grouped into their dotted-quarter beats, so they don't need presets.
+    private var groupingPresets: [[Int]] {
+        guard !viewModel.timeSignature.isCompound else { return [] }
+        switch viewModel.timeSignature.beatsPerBar {
+        case 5: return [[2, 3], [3, 2]]
+        case 7: return [[2, 2, 3], [3, 2, 2], [2, 3, 2]]
+        default: return []
+        }
+    }
+
+    /// The accent pattern a grouping produces (strong downbeat, medium subsequent group heads), used to
+    /// mark the active preset. Mirrors `MetronomeViewModel.applyGrouping`.
+    private static func groupingAccents(_ groups: [Int], beats: Int) -> [BeatAccent] {
+        var pattern = [BeatAccent](repeating: .normal, count: max(beats, 0))
+        guard !pattern.isEmpty else { return pattern }
+        pattern[0] = .strong
+        var index = 0
+        for size in groups where size > 0 {
+            if index > 0 && index < pattern.count { pattern[index] = .medium }
+            index += size
+        }
+        return pattern
     }
 }

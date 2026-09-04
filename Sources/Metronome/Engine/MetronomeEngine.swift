@@ -552,9 +552,12 @@ final class MetronomeEngine {
                 if offset >= 0 {
                     let level = songPlan.accent(at: idx)
                     // Song mode always uses the classic click (table 2). The selected timbre/voice is a
-                    // single-tempo choice, so songs sound exactly as they always have.
-                    triggerVoice(table: 2, bufferIndex: level.rawValue, at: offset,
-                                 into: ablPtr, frameCount: frames, cutVoices: false)
+                    // single-tempo choice, so songs sound exactly as they always have. A muted beat emits
+                    // no click but still publishes its pulse so the count/visual advance.
+                    if level != .muted {
+                        triggerVoice(table: 2, bufferIndex: level.rawValue, at: offset,
+                                     into: ablPtr, frameCount: frames, cutVoices: false)
+                    }
                     publishSongPulse(plan: songPlan, index: idx, level: level)
                 }
                 idx += 1
@@ -582,15 +585,19 @@ final class MetronomeEngine {
                 let offset = onset - blockStart
                 if offset >= 0 {
                     let level = plan.accentLevel(forTick: tick)
-                    if atVoiceMode {
-                        // Voice mode: speak the number/syllable for this tick exactly on its frame,
-                        // cutting any still-sounding previous spoken token. Unmapped ticks fall back to
-                        // a click so every subdivision stays audible.
-                        scheduleVoiceToken(plan.voiceToken(forTick: tick), level: level, at: offset,
-                                           into: ablPtr, frameCount: frames)
-                    } else {
-                        triggerVoice(table: 0, bufferIndex: level.rawValue, at: offset,
-                                     into: ablPtr, frameCount: frames, cutVoices: false)
+                    // A muted beat emits no click (and speaks no number in Voice mode) but still
+                    // publishes its pulse, so the count and the on-screen beat keep advancing.
+                    if level != .muted {
+                        if atVoiceMode {
+                            // Voice mode: speak the number/syllable for this tick exactly on its frame,
+                            // cutting any still-sounding previous spoken token. Unmapped ticks fall back
+                            // to a click so every subdivision stays audible.
+                            scheduleVoiceToken(plan.voiceToken(forTick: tick), level: level, at: offset,
+                                               into: ablPtr, frameCount: frames)
+                        } else {
+                            triggerVoice(table: 0, bufferIndex: level.rawValue, at: offset,
+                                         into: ablPtr, frameCount: frames, cutVoices: false)
+                        }
                     }
                     publishPulse(tick: tick, plan: plan, level: level)
                 }
@@ -627,7 +634,7 @@ final class MetronomeEngine {
         }
         let oldNextOnset = atState.epochFrame + old.frame(forTick: atState.nextTick)
         let anchor = max(oldNextOnset, blockStart)
-        if old.numerator == new.numerator && old.ticksPerBeat == new.ticksPerBeat {
+        if old.beatsPerBar == new.beatsPerBar && old.ticksPerBeat == new.ticksPerBeat {
             atState.epochFrame = anchor - new.frame(forTick: atState.nextTick)   // preserve phase
         } else {
             atState.epochFrame = anchor                                          // restart the bar

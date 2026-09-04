@@ -16,7 +16,7 @@ struct SongSectionEditorView: View {
     @State private var subdivision: Subdivision
     @State private var bars: Int
     @State private var repeatCount: Int
-    @State private var accents: [Bool]
+    @State private var accents: [BeatAccent]
 
     init(section: SongSection, onSave: @escaping (SongSection) -> Void) {
         self.sectionID = section.id
@@ -31,7 +31,12 @@ struct SongSectionEditorView: View {
         _accents = State(initialValue: section.accentPattern)
     }
 
-    private var beatCount: Int { max(1, numerator) }
+    private var timeSig: TimeSignature { TimeSignature(numerator: numerator, denominator: denominator) }
+    /// Main beats (pulses) per bar — compound-aware, so 6/8 edits 2 beats, not 6.
+    private var beatCount: Int { max(1, timeSig.beatsPerBar) }
+    private var subdivisionOptions: [Subdivision] {
+        timeSig.isCompound ? Subdivision.compoundCases : Subdivision.allCases
+    }
 
     private var built: SongSection {
         SongSection(id: sectionID,
@@ -64,18 +69,23 @@ struct SongSectionEditorView: View {
 
                 Section("Time signature") {
                     Stepper("Beats per bar: \(numerator)", value: $numerator, in: 1...16)
-                        .onChange(of: numerator) { _, newValue in
-                            accents = MetronomeConfiguration.normalizedAccents(accents, count: newValue)
-                        }
+                        .onChange(of: numerator) { _, _ in meterChanged() }
                     Picker("Note value", selection: $denominator) {
                         ForEach(TimeSignature.allowedDenominators, id: \.self) { Text("\($0)").tag($0) }
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: denominator) { _, _ in meterChanged() }
+                    if timeSig.isCompound {
+                        Text("Compound meter: felt in \(beatCount) — the beat is a dotted quarter.")
+                            .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                    }
                 }
 
                 Section("Subdivision") {
                     Picker("Subdivision", selection: $subdivision) {
-                        ForEach(Subdivision.allCases) { Text($0.displayName).tag($0) }
+                        ForEach(subdivisionOptions) { s in
+                            Text(timeSig.isCompound ? s.compoundDisplayName : s.displayName).tag(s)
+                        }
                     }
                     .pickerStyle(.segmented)
                 }
@@ -88,12 +98,14 @@ struct SongSectionEditorView: View {
                 Section("Accents") {
                     HStack(spacing: 6) {
                         ForEach(Array(0..<beatCount), id: \.self) { i in
-                            Button { toggleAccent(i) } label: {
+                            Button { cycleAccent(i) } label: {
                                 Text("\(i + 1)").frame(maxWidth: .infinity, minHeight: 38)
                             }
-                            .buttonStyle(SelectableStyle(isOn: accents.indices.contains(i) && accents[i]))
+                            .buttonStyle(BeatAccentCellStyle(accent: accentAt(i)))
                         }
                     }
+                    Text("Tap to cycle: Accent → Medium → Normal → Muted.")
+                        .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
                 }
             }
             .navigationTitle("Edit Section")
@@ -108,10 +120,23 @@ struct SongSectionEditorView: View {
         }
     }
 
-    private func toggleAccent(_ i: Int) {
+    private func accentAt(_ i: Int) -> BeatAccent { accents.indices.contains(i) ? accents[i] : .normal }
+
+    /// Cycles beat `i` to its next accent state (strong → medium → normal → muted → strong).
+    private func cycleAccent(_ i: Int) {
         var updated = MetronomeConfiguration.normalizedAccents(accents, count: beatCount)
-        if updated.indices.contains(i) { updated[i].toggle() }
-        // Re-normalize so the downbeat is never left silent-by-omission.
+        if updated.indices.contains(i) { updated[i] = updated[i].next }
+        // Re-normalize so the downbeat is never left accent-less by omission.
         accents = MetronomeConfiguration.normalizedAccents(updated, count: beatCount)
+    }
+
+    /// Keeps the accent array and subdivision consistent after a meter edit: resize the pattern to the
+    /// new main-beat count, and drop a now-invalid subdivision (e.g. a simple-meter triplet) when the
+    /// meter has become compound.
+    private func meterChanged() {
+        accents = MetronomeConfiguration.normalizedAccents(accents, count: beatCount)
+        if timeSig.isCompound && !Subdivision.compoundCases.contains(subdivision) {
+            subdivision = .quarter
+        }
     }
 }

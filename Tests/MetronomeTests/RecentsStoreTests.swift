@@ -18,7 +18,7 @@ final class RecentsStoreTests: XCTestCase {
                         numerator: Int = 4,
                         denominator: Int = 4,
                         subdivision: Subdivision = .quarter,
-                        accents: [Bool]? = nil,
+                        accents: [BeatAccent]? = nil,
                         sound: MetronomeSound = .classic) -> MetronomeConfiguration {
         MetronomeConfiguration(
             bpm: bpm,

@@ -22,13 +22,14 @@ struct SongSection: Identifiable, Equatable, Codable {
     /// round-trips (a `UUID` is `Codable`).
     var id: UUID
     var name: String
-    /// Beats (pulses) per minute for this section. Clamped to `MetronomeConfiguration.tempoRange`.
+    /// Beats (pulses) per minute for this section — quarter notes in a simple meter, dotted quarters in a
+    /// compound one. Clamped to `MetronomeConfiguration.tempoRange`.
     var tempoBPM: Double
     var timeSignature: TimeSignature
     var subdivision: Subdivision
-    /// One flag per beat (`count == timeSignature.numerator`); `true` == accented. Normalized so the
-    /// downbeat is never silent-by-omission (reuses the single-tempo engine's rule).
-    var accentPattern: [Bool]
+    /// One `BeatAccent` per main beat (`count == timeSignature.beatsPerBar`). Normalized so the downbeat
+    /// is never accent-less by omission (reuses the single-tempo engine's rule).
+    var accentPattern: [BeatAccent]
     /// Measures in one pass of the section (≥1).
     var bars: Int
     /// Number of passes (≥1). The bars play `repeatCount` times back-to-back.
@@ -39,7 +40,7 @@ struct SongSection: Identifiable, Equatable, Codable {
          tempoBPM: Double = 120,
          timeSignature: TimeSignature = .common,
          subdivision: Subdivision = .quarter,
-         accentPattern: [Bool]? = nil,
+         accentPattern: [BeatAccent]? = nil,
          bars: Int = 1,
          repeatCount: Int = 1) {
         self.id = id
@@ -49,8 +50,10 @@ struct SongSection: Identifiable, Equatable, Codable {
         self.subdivision = subdivision
         self.bars = bars.clamped(to: SongSection.barsRange)
         self.repeatCount = repeatCount.clamped(to: SongSection.repeatRange)
-        self.accentPattern = MetronomeConfiguration.normalizedAccents(accentPattern,
-                                                                      count: timeSignature.numerator)
+        // With no explicit pattern, adopt the meter's sensible default (downbeat + secondary group-head
+        // accents), matching the single-tempo engine so a 6/8 section is felt in 2 by default.
+        self.accentPattern = MetronomeConfiguration.normalizedAccents(accentPattern ?? timeSignature.defaultAccents,
+                                                                      count: timeSignature.beatsPerBar)
     }
 
     // Decode through the validating initializer so a hand-edited or older JSON file can never load an
@@ -66,7 +69,7 @@ struct SongSection: Identifiable, Equatable, Codable {
         let bpm = try c.decodeIfPresent(Double.self, forKey: .tempoBPM) ?? 120
         let ts = try c.decodeIfPresent(TimeSignature.self, forKey: .timeSignature) ?? .common
         let sub = try c.decodeIfPresent(Subdivision.self, forKey: .subdivision) ?? .quarter
-        let accents = try c.decodeIfPresent([Bool].self, forKey: .accentPattern)
+        let accents = try c.decodeIfPresent([BeatAccent].self, forKey: .accentPattern)
         let bars = try c.decodeIfPresent(Int.self, forKey: .bars) ?? 1
         let repeatCount = try c.decodeIfPresent(Int.self, forKey: .repeatCount) ?? 1
         self.init(id: id, name: name, tempoBPM: bpm, timeSignature: ts, subdivision: sub,
@@ -75,8 +78,10 @@ struct SongSection: Identifiable, Equatable, Codable {
 
     // MARK: - Derived timing (mirrors MetronomeConfiguration for a single section)
 
-    var ticksPerBeat: Int { subdivision.ticksPerBeat }
-    var beatsPerBar: Int { timeSignature.numerator }
+    /// Clicks per main beat — compound-aware (a compound dotted-quarter beat divides into 3 eighths).
+    var ticksPerBeat: Int { subdivision.ticksPerBeat(compound: timeSignature.isCompound) }
+    /// Main beats (pulses) per bar (2 for 6/8, etc.).
+    var beatsPerBar: Int { timeSignature.beatsPerBar }
     /// Clicks in one bar.
     var ticksPerBar: Int { ticksPerBeat * beatsPerBar }
     /// Bars actually played (one pass × repeats).

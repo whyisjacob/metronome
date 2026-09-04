@@ -100,7 +100,8 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
                         timeSignature: TimeSignature(numerator: spec.numerator,
                                                      denominator: spec.denominator),
                         subdivision: spec.subdivision,
-                        accentPattern: spec.accents,
+                        // Oracle uses boolean accents; map to the engine's `BeatAccent` for the real song.
+                        accentPattern: spec.accents.map { $0 ? BeatAccent.strong : .normal },
                         bars: spec.bars,
                         repeatCount: spec.repeatCount)
         })
@@ -125,16 +126,20 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
 
     /// A second, harder map: a subdivision change into fast sixteenths and a section with repeats, plus
     /// three distinct tempos. Fastest interval is the sixteenth at 132 BPM ≈ 114 ms — still safe.
+    ///
+    /// All three sections are SIMPLE meters (5/8 is odd but not compound; 6/4 is duple-simple), so the
+    /// subdivision's musical ticks-per-beat is the grid — compound meters have their own dedicated
+    /// dotted-quarter accuracy tests in `OfflineRenderAccuracyTests`.
     func testSubdivisionAndRepeatSongMatchesIndependentGrid() throws {
         let specs = [
             Spec(name: "A", bpm: 100, numerator: 4, denominator: 4, subdivision: .quarter,
                  ticksPerBeat: 1, bars: 2, repeatCount: 1, accents: [true, false, false, false]),
             Spec(name: "B", bpm: 132, numerator: 5, denominator: 8, subdivision: .sixteenth,
                  ticksPerBeat: 4, bars: 1, repeatCount: 2, accents: [true, false, true, false, false]),
-            Spec(name: "C", bpm: 80, numerator: 6, denominator: 8, subdivision: .eighth,
+            Spec(name: "C", bpm: 80, numerator: 6, denominator: 4, subdivision: .eighth,
                  ticksPerBeat: 2, bars: 2, repeatCount: 1, accents: [true, false, false, true, false, false]),
         ]
-        try renderAndAssert(specs, label: "sixteenth + repeat song 4/4→5/8→6/8")
+        try renderAndAssert(specs, label: "sixteenth + repeat song 4/4→5/8→6/4")
     }
 
     // MARK: - Render + confront

@@ -27,6 +27,43 @@ struct SelectableStyle: ButtonStyle {
     }
 }
 
+/// A beat cell coloured by its accent state, shared by the metronome and song-section accent editors:
+/// strong = accent colour, medium = secondary, normal = raised surface, muted = dim with a dashed
+/// outline so it reads as intentionally silent. Tapping the button cycles the state.
+struct BeatAccentCellStyle: ButtonStyle {
+    var accent: BeatAccent
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundStyle(foreground)
+            .background(RoundedRectangle(cornerRadius: 12).fill(fill))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(accent == .muted ? Theme.textSecondary.opacity(0.5) : Theme.stroke,
+                                  style: StrokeStyle(lineWidth: 1, dash: accent == .muted ? [4, 3] : []))
+            )
+            .opacity(configuration.isPressed ? 0.6 : 1)
+    }
+
+    private var fill: Color {
+        switch accent {
+        case .strong: return Theme.accentStrong
+        case .medium: return Theme.accentMedium
+        case .normal: return Theme.surfaceRaised
+        case .muted:  return Theme.surface
+        }
+    }
+
+    private var foreground: Color {
+        switch accent {
+        case .strong, .medium: return Theme.background
+        case .normal:          return Theme.textPrimary
+        case .muted:           return Theme.textSecondary
+        }
+    }
+}
+
 /// A titled container card.
 struct Card<Content: View>: View {
     let title: String?
