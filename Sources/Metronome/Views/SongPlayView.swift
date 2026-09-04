@@ -1,16 +1,18 @@
 import SwiftUI
 
-/// Plays a song: runs it through the engine, auto-advances bar-by-bar and section-by-section, and
-/// shows the current section, the current bar, and the next upcoming change.
+/// Plays a song: runs it through the engine, auto-advances bar-by-bar and section-by-section, and shows
+/// the selected visual indicator plus the current section, bar, and upcoming change.
 struct SongPlayView: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject var settings: VisualSettingsStore
     @StateObject private var model: SongPlayerViewModel
 
     /// Display-rate ticker that refreshes the on-screen state. Cosmetic only — sounding is
     /// sample-accurate in the audio engine and never depends on this timer.
     @State private var ticker = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
-    init(song: Song) {
+    init(song: Song, settings: VisualSettingsStore) {
+        _settings = ObservedObject(wrappedValue: settings)
         _model = StateObject(wrappedValue: SongPlayerViewModel(song: song))
     }
 
@@ -18,15 +20,25 @@ struct SongPlayView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
 
-            VStack(spacing: 20) {
+            VStack(spacing: 18) {
                 header
-                Spacer()
+                Spacer(minLength: 8)
+                BeatVisualView(style: settings.indicatorStyle, state: model.visualState)
+                    .frame(height: 230)
+                    .frame(maxWidth: .infinity)
                 nowPlaying
-                Spacer()
+                Spacer(minLength: 8)
                 upNext
                 TransportButton(isPlaying: model.isPlaying) { model.toggle() }
             }
             .padding(20)
+
+            BorderFlashOverlay(flashID: model.flashID,
+                               isOnBeat: model.isOnBeat,
+                               accentLevel: model.activeAccent,
+                               enabled: settings.borderFlashEnabled,
+                               accentColor: settings.accentFlashColor,
+                               normalColor: settings.normalFlashColor)
         }
         .foregroundStyle(Theme.textPrimary)
         .onReceive(ticker) { _ in model.poll() }
@@ -45,26 +57,26 @@ struct SongPlayView: View {
 
     @ViewBuilder private var nowPlaying: some View {
         if let section = model.currentSection {
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 Text(section.name.uppercased())
                     .font(.system(size: 14, weight: .heavy))
                     .tracking(3)
                     .foregroundStyle(Theme.accentNormal)
                 Text(section.tempoSummary)
-                    .font(.system(size: 54, weight: .bold, design: .rounded))
+                    .font(.system(size: 44, weight: .bold, design: .rounded))
                     .monospacedDigit()
                 Text(section.meterAndFeel)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Theme.textSecondary)
                 Text("Bar \(min(model.currentBar, section.totalBars)) of \(section.totalBars)")
-                    .font(.system(size: 16))
+                    .font(.system(size: 15))
                     .foregroundStyle(Theme.textSecondary)
-                    .padding(.top, 4)
+                    .padding(.top, 2)
             }
         } else {
             VStack(spacing: 10) {
                 Text(model.didFinish ? "Finished" : "Ready")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
                 Text(model.didFinish ? "Tap Start to play again" : "Tap Start to play the song")
                     .font(.system(size: 15))
                     .foregroundStyle(Theme.textSecondary)

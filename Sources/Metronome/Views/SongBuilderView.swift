@@ -1,16 +1,20 @@
 import SwiftUI
 
-/// Edits a song: rename it, add / edit / delete / reorder its sections. Works on a local copy and
-/// commits to the `SongStore` on Save, so Cancel discards.
+/// Edits a song: rename it, add / edit / delete / reorder its sections, and play it. Works on a local
+/// copy and commits to the `SongStore` on Save (Cancel discards); Play commits first, then launches the
+/// player so you can hear the piece while building it.
 struct SongBuilderView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: SongStore
+    let settings: VisualSettingsStore
 
     @State private var song: Song
     @State private var editingSection: SongSection?
+    @State private var playingSong: Song?
 
-    init(song: Song, store: SongStore) {
+    init(song: Song, store: SongStore, settings: VisualSettingsStore) {
         self.store = store
+        self.settings = settings
         _song = State(initialValue: song)
     }
 
@@ -22,7 +26,7 @@ struct SongBuilderView: View {
                         .font(.system(size: 18, weight: .semibold))
                 }
 
-                Section("Sections") {
+                Section {
                     ForEach(song.sections) { section in
                         Button { editingSection = section } label: {
                             SongSectionRow(section: section)
@@ -35,6 +39,19 @@ struct SongBuilderView: View {
                     Button(action: addSection) {
                         Label("Add section", systemImage: "plus")
                     }
+                } header: {
+                    Text("Sections")
+                } footer: {
+                    Text("Each section has its own tempo, meter, subdivision and accents. Tap to edit, swipe to delete, and use Edit to reorder. Sections play top to bottom.")
+                }
+
+                Section {
+                    Button(action: play) {
+                        Label("Play song", systemImage: "play.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(song.sections.isEmpty)
                 }
             }
             .navigationTitle("Edit Song")
@@ -54,6 +71,10 @@ struct SongBuilderView: View {
                     }
                 }
             }
+            .fullScreenCover(item: $playingSong) { s in
+                SongPlayView(song: s, settings: settings)
+                    .preferredColorScheme(.dark)
+            }
         }
     }
 
@@ -61,6 +82,12 @@ struct SongBuilderView: View {
         let section = SongSection(name: "Section \(song.sections.count + 1)")
         song.sections.append(section)
         editingSection = section
+    }
+
+    /// Commit the current edits so the player reflects exactly what's on screen, then play.
+    private func play() {
+        store.upsert(song)
+        playingSong = song
     }
 }
 

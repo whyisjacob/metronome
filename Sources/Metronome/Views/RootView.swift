@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// App root: a two-tab shell. The original single-tempo metronome, and the v2 Song Builder that lays
-/// out a piece as a sequence of tempo/meter/subdivision changes and plays it with the same
-/// sample-accurate engine.
+/// App root: a two-tab shell. The single-tempo metronome, and the Songs library (a tempo-map laid out as
+/// a sequence of sections, played with the same sample-accurate engine). Visual preferences are shared
+/// across both tabs.
 struct RootView: View {
     @StateObject private var metronome: MetronomeViewModel
     @StateObject private var songStore = SongStore()
     @StateObject private var recentsStore: RecentsStore
+    @StateObject private var settings = VisualSettingsStore()
 
     init() {
         // One shared RecentsStore: the view model registers changes into it, the metronome screen
@@ -18,10 +19,10 @@ struct RootView: View {
 
     var body: some View {
         TabView {
-            ContentView(viewModel: metronome, recents: recentsStore)
+            ContentView(viewModel: metronome, recents: recentsStore, settings: settings, store: songStore)
                 .tabItem { Label("Metronome", systemImage: "metronome") }
 
-            SongLibraryView(store: songStore)
+            SongLibraryView(store: songStore, settings: settings)
                 .tabItem { Label("Songs", systemImage: "music.note.list") }
         }
         .tint(Theme.accentNormal)

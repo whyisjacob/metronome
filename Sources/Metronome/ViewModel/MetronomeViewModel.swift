@@ -18,6 +18,13 @@ final class MetronomeViewModel: ObservableObject {
     @Published private(set) var activeAccent: AccentLevel = .normal
     /// Bumps once per click; views key transient flash animations off this.
     @Published private(set) var flashID: UInt64 = 0
+    /// Current beat (0-based) held *sticky* across the subdivision clicks between beats — unlike
+    /// `activeBeat`, which goes `nil` on a subdivision click. Feeds the counter/ring/dots indicators.
+    @Published private(set) var displayBeat: Int?
+    /// 0 on the beat, then 1…ticksPerBeat-1 through the subdivisions of the current beat.
+    @Published private(set) var subdivisionPhase = 0
+    /// Whether the latest click landed on a beat (vs a subdivision between beats).
+    @Published private(set) var isOnBeat = false
 
     private let engine = MetronomeEngine()
     private var tapTempo = TapTempo()
@@ -73,6 +80,9 @@ final class MetronomeViewModel: ObservableObject {
         isPlaying = playing
         if !playing {
             activeBeat = nil
+            displayBeat = nil
+            subdivisionPhase = 0
+            isOnBeat = false
             lastPulseSequence = 0
         }
         #if canImport(UIKit)
@@ -155,5 +165,25 @@ final class MetronomeViewModel: ObservableObject {
         activeBeat = pulse.beatIndex
         activeAccent = pulse.accent
         flashID = pulse.sequence
+        let wasBeat = pulse.beatIndex != nil
+        isOnBeat = wasBeat
+        if let beat = pulse.beatIndex { displayBeat = beat }   // sticky: hold the beat through its subdivisions
+        subdivisionPhase = BeatVisualState.nextSubdivisionPhase(previous: subdivisionPhase,
+                                                                wasBeat: wasBeat,
+                                                                ticksPerBeat: config.ticksPerBeat)
+    }
+
+    /// The immutable snapshot the selected beat indicator renders from — built from the polled pulse and
+    /// the current configuration, so every indicator style stays synced to the audio.
+    var visualState: BeatVisualState {
+        BeatVisualState(beatsPerMeasure: timeSignature.numerator,
+                        ticksPerBeat: config.ticksPerBeat,
+                        accents: accents,
+                        currentBeat: isPlaying ? displayBeat : nil,
+                        subdivisionPhase: subdivisionPhase,
+                        accentLevel: activeAccent,
+                        flashID: flashID,
+                        isPlaying: isPlaying,
+                        isOnBeat: isOnBeat)
     }
 }

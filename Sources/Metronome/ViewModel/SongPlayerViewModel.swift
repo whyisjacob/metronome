@@ -22,6 +22,12 @@ final class SongPlayerViewModel: ObservableObject {
     @Published private(set) var activeAccent: AccentLevel = .normal
     @Published private(set) var flashID: UInt64 = 0
     @Published private(set) var didFinish = false
+    /// Current beat (0-based) held sticky across subdivisions; drives the selected beat indicator.
+    @Published private(set) var displayBeat: Int?
+    /// 0 on the beat, then 1…ticksPerBeat-1 through the current beat's subdivisions.
+    @Published private(set) var subdivisionPhase = 0
+    /// Whether the latest click landed on a beat (vs a subdivision between beats).
+    @Published private(set) var isOnBeat = false
 
     private let engine = MetronomeEngine()
     private var lastSequence: UInt64 = 0
@@ -63,6 +69,9 @@ final class SongPlayerViewModel: ObservableObject {
         isPlaying = playing
         if !playing {
             activeBeat = nil
+            displayBeat = nil
+            subdivisionPhase = 0
+            isOnBeat = false
             lastSequence = 0
         }
         #if canImport(UIKit)
@@ -89,6 +98,29 @@ final class SongPlayerViewModel: ObservableObject {
         activeBeat = pulse.beatIndex
         activeAccent = pulse.accent
         flashID = pulse.sequence
+        let wasBeat = pulse.beatIndex != nil
+        isOnBeat = wasBeat
+        if let beat = pulse.beatIndex { displayBeat = beat }
+        // `currentSection` already reflects the pulse we just applied above.
+        let ticksPerBeat = currentSection?.ticksPerBeat ?? 1
+        subdivisionPhase = BeatVisualState.nextSubdivisionPhase(previous: subdivisionPhase,
+                                                                wasBeat: wasBeat,
+                                                                ticksPerBeat: ticksPerBeat)
+    }
+
+    /// The snapshot the selected beat indicator renders from, built from the current section's meter /
+    /// subdivision / accents and the polled pulse. `nil`-safe: idle before the first click.
+    var visualState: BeatVisualState {
+        guard isPlaying, let section = currentSection else { return BeatVisualState.idle() }
+        return BeatVisualState(beatsPerMeasure: section.beatsPerBar,
+                               ticksPerBeat: section.ticksPerBeat,
+                               accents: section.accentPattern,
+                               currentBeat: displayBeat,
+                               subdivisionPhase: subdivisionPhase,
+                               accentLevel: activeAccent,
+                               flashID: flashID,
+                               isPlaying: true,
+                               isOnBeat: isOnBeat)
     }
 
     // MARK: - Derived UI state

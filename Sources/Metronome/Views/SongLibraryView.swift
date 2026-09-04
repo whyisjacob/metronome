@@ -1,9 +1,11 @@
 import SwiftUI
 
 /// The song library: lists saved songs, adds new ones, and launches edit / play. Reordering and
-/// deletion are available via the standard edit mode.
+/// deletion are available via the standard edit mode. Each row makes both actions obvious — tap the
+/// title to edit, tap the green button to play.
 struct SongLibraryView: View {
     @ObservedObject var store: SongStore
+    @ObservedObject var settings: VisualSettingsStore
     @State private var editingSong: Song?
     @State private var playingSong: Song?
 
@@ -24,10 +26,12 @@ struct SongLibraryView: View {
                 }
             }
             .sheet(item: $editingSong) { song in
-                SongBuilderView(song: song, store: store)
+                SongBuilderView(song: song, store: store, settings: settings)
+                    .preferredColorScheme(.dark)
             }
             .fullScreenCover(item: $playingSong) { song in
-                SongPlayView(song: song)
+                SongPlayView(song: song, settings: settings)
+                    .preferredColorScheme(.dark)
             }
         }
     }
@@ -57,7 +61,7 @@ struct SongLibraryView: View {
                 .foregroundStyle(Theme.textSecondary)
             Text("No songs yet")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
-            Text("Tap + to build a tempo-map — sections whose time signature and tempo change through the piece.")
+            Text("Tap + to build a tempo-map — sections whose tempo and time signature change through the piece. Or tap the bookmark on the Metronome screen to save your current settings as a song.")
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -78,24 +82,29 @@ private struct SongRow: View {
     let onPlay: () -> Void
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Button(action: onEdit) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(song.name)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("\(song.sections.count) section\(song.sections.count == 1 ? "" : "s") · \(song.totalBars) bars")
-                        .font(.system(size: 13))
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(song.name)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("\(song.sections.count) section\(song.sections.count == 1 ? "" : "s") · \(song.totalBars) bars")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.textSecondary)
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            Spacer()
-
             Button(action: onPlay) {
                 Image(systemName: "play.circle.fill")
-                    .font(.system(size: 30))
+                    .font(.system(size: 34))
                     .foregroundStyle(song.sections.isEmpty ? Theme.beatIdle : Theme.start)
             }
             .buttonStyle(.plain)
