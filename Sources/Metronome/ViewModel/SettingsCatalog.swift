@@ -18,6 +18,8 @@ enum AppControl: String, CaseIterable {
     // Everything else — consolidated into the single collapsible Settings screen.
     case sound              // click timbre + Voice mode
     case voiceCounting      // Voice: speak subdivisions aloud
+    case swing              // swing / shuffle amount
+    case rhythmCell         // idiomatic sixteenth-grid pattern picker
     case accents            // per-beat accent pattern
     case visualIndicator    // which beat-indicator style is shown
     case borderFlash        // screen-edge flash toggle + colours
@@ -30,6 +32,7 @@ enum AppControl: String, CaseIterable {
 enum SettingsSection: String, CaseIterable, Identifiable {
     case sound
     case voice
+    case groove
     case accents
     case visuals
     case borderFlash
@@ -42,6 +45,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .sound:       return "Sound"
         case .voice:       return "Voice"
+        case .groove:      return "Groove"
         case .accents:     return "Accents"
         case .visuals:     return "Visuals"
         case .borderFlash: return "Border flash"
@@ -55,6 +59,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .sound:       return "speaker.wave.2.fill"
         case .voice:       return "person.wave.2.fill"
+        case .groove:      return "waveform.path"
         case .accents:     return "chart.bar.fill"
         case .visuals:     return "circle.circle.fill"
         case .borderFlash: return "rectangle.inset.filled.and.person.filled"
@@ -79,6 +84,8 @@ extension AppControl {
             return .mainScreen
         case .sound:           return .settings(.sound)
         case .voiceCounting:   return .settings(.voice)
+        case .swing:           return .settings(.groove)
+        case .rhythmCell:      return .settings(.groove)
         case .accents:         return .settings(.accents)
         case .visualIndicator: return .settings(.visuals)
         case .borderFlash:     return .settings(.borderFlash)

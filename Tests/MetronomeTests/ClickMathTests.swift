@@ -316,4 +316,167 @@ final class ClickMathTests: XCTestCase {
         XCTAssertEqual(BeatAccent.normal.next, .muted)
         XCTAssertEqual(BeatAccent.muted.next, .strong)
     }
+
+    // MARK: - Even tuplets (quintuplet / sextuplet / septuplet)
+
+    func testTupletTickCounts() {
+        XCTAssertEqual(Subdivision.quintuplet.ticksPerBeat, 5)
+        XCTAssertEqual(Subdivision.sextuplet.ticksPerBeat, 6)
+        XCTAssertEqual(Subdivision.septuplet.ticksPerBeat, 7)
+    }
+
+    func testTupletSecondsPerTickSplitsTheBeatEvenly() {
+        // 120 BPM → 0.5 s/beat. A quintuplet is 5 equal clicks; a septuplet 7.
+        XCTAssertEqual(MetronomeConfiguration(bpm: 120, subdivision: .quintuplet).secondsPerTick,
+                       0.5 / 5.0, accuracy: 1e-12)
+        XCTAssertEqual(MetronomeConfiguration(bpm: 120, subdivision: .septuplet).secondsPerTick,
+                       0.5 / 7.0, accuracy: 1e-12)
+    }
+
+    /// Voice on a tuplet: the beat speaks its number, the in-between ticks click (no standard syllables
+    /// exist for quintuplets/septuplets; the sextuplet is counted the same way here).
+    func testVoiceTokenTupletsSpeakBeatNumberAndClickBetween() {
+        for (sub, tpb) in [(Subdivision.quintuplet, 5), (.sextuplet, 6), (.septuplet, 7)] {
+            let p = plan(120, .common, sub)
+            XCTAssertEqual(p.voiceToken(forTick: 0), .number(0), "\(sub) beat 1 speaks its number")
+            for t in 1..<tpb {
+                XCTAssertEqual(p.voiceToken(forTick: t), VoiceToken.none,
+                               "\(sub) tick \(t) should click (no spoken syllable)")
+            }
+            XCTAssertEqual(p.voiceToken(forTick: tpb), .number(1), "\(sub) next beat speaks its number")
+        }
+    }
+
+    /// Tuplets carry the beat accent on their downbeat and are weak in between — same rule as any other
+    /// subdivision, proving they drop straight into the accent model.
+    func testTupletAccentLevels() {
+        let c = MetronomeConfiguration(bpm: 120, timeSignature: .common, subdivision: .quintuplet)
+        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)     // beat 1 downbeat
+        for t in 1..<5 { XCTAssertEqual(c.accentLevel(forTick: t), .weak) }
+        XCTAssertEqual(c.accentLevel(forTick: 5), .normal)     // beat 2 downbeat
+        XCTAssertEqual(c.beatIndex(forTick: 5), 1)
+        XCTAssertNil(c.beatIndex(forTick: 3))
+    }
+
+    // MARK: - Swing / shuffle (exact frame placement — pure, no audio)
+
+    /// Swung eighths, worked out from first principles at a sample rate where the frames are exact:
+    /// 120 BPM eighth = 12 000 frames/tick straight (24 000 frames/beat). The off-beat (tick 1) moves
+    /// from ½ of the beat (12 000) to ⅔ (16 000) as swing runs 0 → 1; the beats never move.
+    func testSwungEighthFramesMatchFirstPrinciples() {
+        let sr = 48_000.0
+        // Straight (swing 0): identical to the original grid, byte-for-byte.
+        let straight = MetronomeConfiguration(bpm: 120, subdivision: .eighth, swing: 0)
+        XCTAssertEqual(straight.frame(forTick: 1, sampleRate: sr), 12_000)
+
+        // Half swing: off-beat at (0.5 + 0.5/6) · 24 000 = 14 000; beats unchanged.
+        let half = MetronomeConfiguration(bpm: 120, subdivision: .eighth, swing: 0.5)
+        XCTAssertEqual(half.frame(forTick: 0, sampleRate: sr), 0)
+        XCTAssertEqual(half.frame(forTick: 1, sampleRate: sr), 14_000)
+        XCTAssertEqual(half.frame(forTick: 2, sampleRate: sr), 24_000)   // beat 2 — unmoved
+
+        // Full swing: off-beat at ⅔ · 24 000 = 16 000 (the triplet position).
+        let full = MetronomeConfiguration(bpm: 120, subdivision: .eighth, swing: 1.0)
+        XCTAssertEqual(full.frame(forTick: 0, sampleRate: sr), 0)
+        XCTAssertEqual(full.frame(forTick: 1, sampleRate: sr), 16_000)
+        XCTAssertEqual(full.frame(forTick: 2, sampleRate: sr), 24_000)   // beat 2 — unmoved
+        XCTAssertEqual(full.frame(forTick: 3, sampleRate: sr), 40_000)   // beat 2 + ⅔ beat
+    }
+
+    /// Swung sixteenths: within each eighth the odd sixteenth ("e"/"a") moves to ⅔ of that eighth, while
+    /// the beat AND the "and" (the on-eighth pulses at even positions) stay exactly on the straight grid.
+    func testSwungSixteenthFramesKeepOnPulsesFixed() {
+        let sr = 48_000.0
+        let full = MetronomeConfiguration(bpm: 120, subdivision: .sixteenth, swing: 1.0)
+        // 6 000 frames/tick straight, 24 000 frames/beat.
+        XCTAssertEqual(full.frame(forTick: 0, sampleRate: sr), 0)        // beat
+        XCTAssertEqual(full.frame(forTick: 1, sampleRate: sr), 8_000)    // "e" → ⅔ of the first eighth
+        XCTAssertEqual(full.frame(forTick: 2, sampleRate: sr), 12_000)   // "and" (on-eighth) — unmoved
+        XCTAssertEqual(full.frame(forTick: 3, sampleRate: sr), 20_000)   // "a" → ⅔ of the second eighth
+        XCTAssertEqual(full.frame(forTick: 4, sampleRate: sr), 24_000)   // next beat — unmoved
+    }
+
+    /// Swing only touches eighth and sixteenth divisions; a triplet (or any tuplet) is left straight even
+    /// at full swing.
+    func testSwingDoesNotAffectTriplets() {
+        let sr = 48_000.0
+        let straight = MetronomeConfiguration(bpm: 120, subdivision: .triplet, swing: 0)
+        let swung = MetronomeConfiguration(bpm: 120, subdivision: .triplet, swing: 1.0)
+        for n in 0...12 {
+            XCTAssertEqual(swung.frame(forTick: n, sampleRate: sr),
+                           straight.frame(forTick: n, sampleRate: sr),
+                           "triplet tick \(n) must not swing")
+        }
+    }
+
+    func testSwingIsClampedToUnitRange() {
+        XCTAssertEqual(MetronomeConfiguration(subdivision: .eighth, swing: 5).swing, 1.0)
+        XCTAssertEqual(MetronomeConfiguration(subdivision: .eighth, swing: -3).swing, 0.0)
+    }
+
+    // MARK: - Idiomatic cells (which sixteenth sub-positions sound — pure, no audio)
+
+    func testCellSilencesExactlyTheNonSoundingSixteenths() {
+        // 4/4 sixteenths (tpb 4), default accents [strong, normal, medium, normal].
+        func level(_ cell: RhythmCell, _ tick: Int) -> AccentLevel {
+            MetronomeConfiguration(bpm: 120, timeSignature: .common, subdivision: .sixteenth, cell: cell)
+                .accentLevel(forTick: tick)
+        }
+
+        // Dotted-8th + 16th = [0, 3]: only the beat and the last sixteenth sound.
+        XCTAssertEqual(level(.dottedEighthSixteenth, 0), .strong)
+        XCTAssertEqual(level(.dottedEighthSixteenth, 1), .muted)
+        XCTAssertEqual(level(.dottedEighthSixteenth, 2), .muted)
+        XCTAssertEqual(level(.dottedEighthSixteenth, 3), .weak)
+
+        // Gallop = [0, 2, 3].
+        XCTAssertEqual(level(.gallop, 0), .strong)
+        XCTAssertEqual(level(.gallop, 1), .muted)
+        XCTAssertEqual(level(.gallop, 2), .weak)
+        XCTAssertEqual(level(.gallop, 3), .weak)
+
+        // Reverse gallop = [0, 1, 3].
+        XCTAssertEqual(level(.reverseGallop, 0), .strong)
+        XCTAssertEqual(level(.reverseGallop, 1), .weak)
+        XCTAssertEqual(level(.reverseGallop, 2), .muted)
+        XCTAssertEqual(level(.reverseGallop, 3), .weak)
+
+        // Straight (Off): every sixteenth sounds.
+        XCTAssertEqual(level(.straight, 1), .weak)
+        XCTAssertEqual(level(.straight, 2), .weak)
+    }
+
+    /// The cell's downbeat (position 0) keeps its beat accent on every beat, so it is always emphasised
+    /// over the cell's inner (weak) sixteenths.
+    func testCellDownbeatCarriesTheBeatAccent() {
+        let c = MetronomeConfiguration(bpm: 120, timeSignature: .common, subdivision: .sixteenth,
+                                       cell: .gallop)
+        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)   // beat 1 head
+        XCTAssertEqual(c.accentLevel(forTick: 8), .medium)   // beat 3 head (default 4/4 medium)
+        XCTAssertEqual(c.beatIndex(forTick: 8), 2)
+    }
+
+    /// A cell is inert unless the sixteenth subdivision is active — selecting one on an eighth pulse
+    /// silences nothing.
+    func testCellIsInertOffTheSixteenthGrid() {
+        let c = MetronomeConfiguration(bpm: 120, timeSignature: .common, subdivision: .eighth,
+                                       cell: .gallop)
+        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)
+        XCTAssertEqual(c.accentLevel(forTick: 1), .weak, "no sixteenth grid → the cell silences nothing")
+    }
+
+    /// The audio path (`RenderPlan`) must mirror the pure config exactly for a swung AND celled config —
+    /// same frames, same accents, same beat indices — so what the accuracy tests prove about the config is
+    /// what the engine renders. (Extends `testRenderPlanMatchesConfiguration` to the new parameters.)
+    func testRenderPlanMatchesConfigurationWithSwingAndCell() {
+        let sr = 44_100.0
+        let swung = MetronomeConfiguration(bpm: 143, timeSignature: .common, subdivision: .sixteenth,
+                                           swing: 0.7, cell: .gallop)
+        let plan = RenderPlan(config: swung, sampleRate: sr)
+        for n in 0...2000 {
+            XCTAssertEqual(plan.frame(forTick: n), swung.frame(forTick: n, sampleRate: sr), "frame \(n)")
+            XCTAssertEqual(plan.accentLevel(forTick: n), swung.accentLevel(forTick: n), "accent \(n)")
+            XCTAssertEqual(plan.beatIndex(forTick: n), swung.beatIndex(forTick: n), "beatIndex \(n)")
+        }
+    }
 }

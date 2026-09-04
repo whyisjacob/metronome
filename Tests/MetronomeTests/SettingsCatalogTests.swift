@@ -32,9 +32,9 @@ final class SettingsCatalogTests: XCTestCase {
                        "a Settings section has no control, or a control references a missing section")
     }
 
-    func testSettingsSectionsAreTheExpectedSevenInOrder() {
+    func testSettingsSectionsAreTheExpectedEightInOrder() {
         XCTAssertEqual(SettingsSection.allCases.map(\.rawValue),
-                       ["sound", "voice", "accents", "visuals", "borderFlash", "gapTrainer", "recents"])
+                       ["sound", "voice", "groove", "accents", "visuals", "borderFlash", "gapTrainer", "recents"])
         for section in SettingsSection.allCases {
             XCTAssertFalse(section.title.isEmpty, "\(section) has no title")
             XCTAssertFalse(section.systemImage.isEmpty, "\(section) has no icon")

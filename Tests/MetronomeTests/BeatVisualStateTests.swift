@@ -35,6 +35,27 @@ final class BeatVisualStateTests: XCTestCase {
         XCTAssertEqual(phase, 0, "the next beat resets the phase")
     }
 
+    /// Even tuplets (5 / 6 / 7 ticks per beat) walk the subdivision phase 0…tpb-1 and cap there. This is
+    /// exactly what drives the ring/dots to render the tuplet ticks: both `SubdivisionPips` and the ring's
+    /// `subdivisionSlots` iterate `0..<ticksPerBeat`, so a correct phase walk means the tuplet clicks are
+    /// drawn and lit in step with the audio.
+    func testSubdivisionPhaseWalksThroughTuplets() {
+        for tpb in [5, 6, 7] {
+            var phase = BeatVisualState.nextSubdivisionPhase(previous: 0, wasBeat: true, ticksPerBeat: tpb)
+            XCTAssertEqual(phase, 0, "tuplet \(tpb): a beat resets the phase")
+            for expected in 1..<tpb {
+                phase = BeatVisualState.nextSubdivisionPhase(previous: phase, wasBeat: false, ticksPerBeat: tpb)
+                XCTAssertEqual(phase, expected, "tuplet \(tpb): phase should advance to \(expected)")
+            }
+            // An extra sub-click never runs past the last tuplet tick…
+            phase = BeatVisualState.nextSubdivisionPhase(previous: phase, wasBeat: false, ticksPerBeat: tpb)
+            XCTAssertEqual(phase, tpb - 1, "tuplet \(tpb): phase caps at ticksPerBeat-1")
+            // …and the next beat resets it.
+            phase = BeatVisualState.nextSubdivisionPhase(previous: phase, wasBeat: true, ticksPerBeat: tpb)
+            XCTAssertEqual(phase, 0)
+        }
+    }
+
     func testIdleStateIsNotPlaying() {
         let s = BeatVisualState.idle()
         XCTAssertFalse(s.isPlaying)

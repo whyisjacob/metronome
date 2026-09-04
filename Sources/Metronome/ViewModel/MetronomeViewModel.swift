@@ -46,6 +46,10 @@ final class MetronomeViewModel: ObservableObject {
     var subdivision: Subdivision { config.subdivision }
     var accents: [BeatAccent] { config.accents }
     var sound: MetronomeSound { config.sound }
+    /// Swing / shuffle amount (0…1); 0 is straight.
+    var swing: Double { config.swing }
+    /// The idiomatic sixteenth-grid cell currently applied (`.straight` = off).
+    var cell: RhythmCell { config.cell }
     /// Whether Voice mode speaks the in-between subdivision syllables (persisted; default on).
     var speakSubdivisions: Bool { soundSettings?.speakSubdivisions ?? true }
 
@@ -114,6 +118,13 @@ final class MetronomeViewModel: ObservableObject {
     func nudgeBPM(_ delta: Double) { setBPM((config.bpm + delta).rounded()) }
 
     func setSubdivision(_ subdivision: Subdivision) { updateConfig { $0.subdivision = subdivision } }
+
+    /// Sets the swing / shuffle amount (0…1). Clamped by the config initializer. Delays the off-beat
+    /// eighth/sixteenth pair members toward the triplet position; the main beats never move.
+    func setSwing(_ value: Double) { updateConfig { $0.swing = value } }
+
+    /// Selects an idiomatic rhythm cell (sixteenth grid only; `.straight` = off).
+    func setCell(_ cell: RhythmCell) { updateConfig { $0.cell = cell } }
 
     func setSound(_ sound: MetronomeSound) {
         updateConfig { $0.sound = sound }
@@ -232,7 +243,9 @@ final class MetronomeViewModel: ObservableObject {
                                                 timeSignature: next.timeSignature,
                                                 subdivision: next.subdivision,
                                                 accents: next.accents,
-                                                sound: next.sound)
+                                                sound: next.sound,
+                                                swing: next.swing,
+                                                cell: next.cell)
         config = normalized
         engine.update(normalized)
         recents?.remember(normalized)

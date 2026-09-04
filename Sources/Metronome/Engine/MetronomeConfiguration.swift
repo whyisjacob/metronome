@@ -8,6 +8,8 @@ import Foundation
 /// tested directly, independently of AVAudioEngine.
 struct MetronomeConfiguration: Equatable, Codable {
     static let tempoRange: ClosedRange<Double> = 30...300
+    /// Swing amount: `0` = straight, `1` = full triplet swing. Clamped to this range.
+    static let swingRange: ClosedRange<Double> = 0...1
 
     /// Beats (pulses) per minute — quarter notes in a simple meter, **dotted quarters** in a compound
     /// one. Clamped to `tempoRange`.
@@ -19,26 +21,38 @@ struct MetronomeConfiguration: Equatable, Codable {
     /// The click timbre, or the spoken-number Voice mode. Purely a sound choice — it has no effect on
     /// timing, so `RenderPlan`/`SongPlan` ignore it; only the engine's buffer selection consults it.
     var sound: MetronomeSound
+    /// Swing / shuffle amount (`0`…`1`). Delays the off-beat members of eighth (and sixteenth) pairs from
+    /// ½ toward ⅔ of the pair; the main beats never move. `0` (the default) keeps a perfectly straight,
+    /// byte-for-byte unchanged grid. See `SwingGrid`.
+    var swing: Double
+    /// A preset idiomatic rhythm cell on the sixteenth grid (silences some sub-positions). `.straight`
+    /// (the default) sounds every sixteenth. Applies only when `subdivision == .sixteenth`. See `RhythmCell`.
+    var cell: RhythmCell
 
     init(bpm: Double = 120,
          timeSignature: TimeSignature = .common,
          subdivision: Subdivision = .quarter,
          accents: [BeatAccent]? = nil,
-         sound: MetronomeSound = .classic) {
+         sound: MetronomeSound = .classic,
+         swing: Double = 0,
+         cell: RhythmCell = .straight) {
         self.bpm = bpm.clamped(to: Self.tempoRange)
         self.timeSignature = timeSignature
         self.subdivision = subdivision
         self.sound = sound
+        self.swing = swing.clamped(to: Self.swingRange)
+        self.cell = cell
         // With no explicit accents, adopt the meter's sensible default (downbeat + secondary group-head
         // accents for simple meters, every dotted-quarter group head for compound 6/8-style meters).
         self.accents = MetronomeConfiguration.normalizedAccents(accents ?? timeSignature.defaultAccents,
                                                                 count: timeSignature.beatsPerBar)
     }
 
-    // Decode through the validating initializer (clamps bpm, re-sizes accents) and tolerate a missing
-    // `sound` key so older/persisted configs still load. `BeatAccent` decoding also accepts the legacy
-    // `[Bool]` accent form. Encoding stays synthesized from `CodingKeys`.
-    enum CodingKeys: String, CodingKey { case bpm, timeSignature, subdivision, accents, sound }
+    // Decode through the validating initializer (clamps bpm/swing, re-sizes accents) and tolerate missing
+    // keys (`sound`, `swing`, `cell`) so older/persisted configs still load — a pre-swing recent decodes
+    // as straight. `BeatAccent` decoding also accepts the legacy `[Bool]` accent form. Encoding stays
+    // synthesized from `CodingKeys`.
+    enum CodingKeys: String, CodingKey { case bpm, timeSignature, subdivision, accents, sound, swing, cell }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -47,7 +61,10 @@ struct MetronomeConfiguration: Equatable, Codable {
         let sub = try c.decodeIfPresent(Subdivision.self, forKey: .subdivision) ?? .quarter
         let accents = try c.decodeIfPresent([BeatAccent].self, forKey: .accents)
         let sound = try c.decodeIfPresent(MetronomeSound.self, forKey: .sound) ?? .classic
-        self.init(bpm: bpm, timeSignature: ts, subdivision: sub, accents: accents, sound: sound)
+        let swing = try c.decodeIfPresent(Double.self, forKey: .swing) ?? 0
+        let cell = try c.decodeIfPresent(RhythmCell.self, forKey: .cell) ?? .straight
+        self.init(bpm: bpm, timeSignature: ts, subdivision: sub, accents: accents, sound: sound,
+                  swing: swing, cell: cell)
     }
 
     // MARK: - Derived timing
@@ -78,20 +95,30 @@ struct MetronomeConfiguration: Equatable, Codable {
     /// identical to `RenderPlan.frame(forTick:)` so the audio render path places onsets on exactly
     /// the frames this pure function predicts — floating-point multiplication is not associative, so
     /// the two must group the operands the same way.
+    ///
+    /// Swing (when `swing > 0` on an eighth/sixteenth subdivision) shifts the off-beat pair members via
+    /// the shared `SwingGrid`; at `swing == 0` it is exactly the closed form above, unchanged.
     func frame(forTick n: Int, sampleRate: Double) -> Int {
-        Int((Double(n) * framesPerTick(sampleRate: sampleRate)).rounded())
+        SwingGrid.frame(forTick: n, ticksPerBeat: ticksPerBeat,
+                        framesPerTick: framesPerTick(sampleRate: sampleRate), swing: swing)
     }
 
     /// The emphasis of tick `n` (a global tick index counted from playback start).
     ///
     /// A **muted** beat suppresses its whole span — the on-beat click *and* the subdivisions inside it —
     /// so the beat is genuinely silent; the engine still publishes the pulse so the count/visual advance.
+    ///
+    /// An idiomatic **cell** (sixteenth grid only) silences the sub-positions it does not sound, reusing
+    /// the same `.muted` path so those ticks are silent but still advance the count. Position 0 keeps the
+    /// beat's accent, so the cell's downbeat is emphasised over its inner sixteenths.
     func accentLevel(forTick n: Int) -> AccentLevel {
         let tpb = ticksPerBeat
         let beat = beatIndexWithinBar(n / tpb)
         let beatAccent = accents.indices.contains(beat) ? accents[beat] : .normal
         if beatAccent == .muted { return .muted }             // whole beat (incl. subdivisions) silent
-        guard n % tpb == 0 else { return .weak }              // between beats → subdivision click
+        let pos = n % tpb
+        if cell.silences(posInBeat: pos, ticksPerBeat: tpb) { return .muted }   // cell-silenced sub-position
+        guard pos == 0 else { return .weak }                  // between beats → subdivision click
         return beatAccent.audioLevel                          // strong / medium / normal
     }
 

@@ -43,11 +43,13 @@ final class OfflineRenderAccuracyTests: XCTestCase {
 
     func testOnsetsMatchFirstPrinciplesGridWithZeroDrift() throws {
         // ≥3 tempos (40 / 120 / 208) and several time-signature × subdivision combinations, including an
-        // odd meter (7/8) and every subdivision (32nds included). These are all SIMPLE meters, so the
-        // subdivision's musical ticks-per-beat (hard-coded below) is the grid; compound meters have their
-        // own dotted-quarter accuracy test (`testCompoundMetersInTwoOnDottedQuarterGridAreDriftFree`).
-        // The fastest inter-onset interval here is 208 BPM sixteenths ≈ 72 ms, comfortably longer than the
-        // 18 ms detection guard below; the 100 BPM 32nds ≈ 75 ms are next-fastest, still well clear.
+        // odd meter (7/8), the even tuplets (quintuplet / sextuplet / septuplet), and every other
+        // subdivision (32nds included). These are all SIMPLE meters, so the subdivision's musical
+        // ticks-per-beat (hard-coded below) is the grid; compound meters have their own dotted-quarter
+        // accuracy test (`testCompoundMetersInTwoOnDottedQuarterGridAreDriftFree`). The fastest inter-onset
+        // interval here is 208 BPM sixteenths ≈ 72 ms, comfortably longer than the 18 ms detection guard
+        // below; the 100 BPM 32nds ≈ 75 ms and the 84 BPM septuplet ≈ 102 ms are the next-fastest, all
+        // well clear.
         let cases: [Case] = [
             Case(bpm: 40,  numerator: 4, denominator: 4, subdivision: .quarter,      ticksPerBeat: 1),
             Case(bpm: 120, numerator: 4, denominator: 4, subdivision: .quarter,      ticksPerBeat: 1),
@@ -56,6 +58,11 @@ final class OfflineRenderAccuracyTests: XCTestCase {
             Case(bpm: 90,  numerator: 3, denominator: 8, subdivision: .sixteenth,    ticksPerBeat: 4),
             Case(bpm: 144, numerator: 7, denominator: 8, subdivision: .triplet,      ticksPerBeat: 3),
             Case(bpm: 208, numerator: 4, denominator: 4, subdivision: .sixteenth,    ticksPerBeat: 4),
+            // Even tuplets (ticksPerBeat = 5 / 6 / 7) — the new subdivisions, each an evenly-split beat,
+            // held to the same first-principles grid: `k · 60/BPM / ticksPerBeat`.
+            Case(bpm: 100, numerator: 4, denominator: 4, subdivision: .quintuplet,   ticksPerBeat: 5),
+            Case(bpm: 90,  numerator: 3, denominator: 4, subdivision: .sextuplet,    ticksPerBeat: 6),
+            Case(bpm: 84,  numerator: 4, denominator: 4, subdivision: .septuplet,    ticksPerBeat: 7),
             // 32nd note (ticksPerBeat = 8) — the new subdivision, held to the same independent grid.
             Case(bpm: 100, numerator: 4, denominator: 4, subdivision: .thirtysecond, ticksPerBeat: 8),
             Case(bpm: 60,  numerator: 3, denominator: 4, subdivision: .thirtysecond, ticksPerBeat: 8),

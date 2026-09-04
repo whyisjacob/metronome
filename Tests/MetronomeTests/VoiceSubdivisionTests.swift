@@ -24,9 +24,11 @@ final class VoiceSubdivisionTests: XCTestCase {
     func testVoiceModePlacesASoundOnEverySubdivisionTick() throws {
         // ticksPerBeat hard-coded (musical meaning), so the grid is independent of the code under test.
         let cases = [
-            VC(sub: .eighth,    tpb: 2, label: "eighth (1 and)"),
-            VC(sub: .triplet,   tpb: 3, label: "triplet (1 trip let)"),
-            VC(sub: .sixteenth, tpb: 4, label: "sixteenth (1 e and a)"),
+            VC(sub: .eighth,     tpb: 2, label: "eighth (1 and)"),
+            VC(sub: .triplet,    tpb: 3, label: "triplet (1 trip let)"),
+            VC(sub: .sixteenth,  tpb: 4, label: "sixteenth (1 e and a)"),
+            // A tuplet: the beat speaks its number, the four in-between ticks click — a sound on every tick.
+            VC(sub: .quintuplet, tpb: 5, label: "quintuplet (number + clicks)"),
         ]
         for c in cases {
             let bpm = 90.0

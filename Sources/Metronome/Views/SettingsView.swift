@@ -69,6 +69,7 @@ struct SettingsView: View {
         switch section {
         case .sound:       SoundControlView(viewModel: viewModel)
         case .voice:       voiceSection
+        case .groove:      GrooveControlView(viewModel: viewModel)
         case .accents:     AccentRowView(viewModel: viewModel)
         case .visuals:     visualsSection
         case .borderFlash: borderFlashSection
@@ -83,12 +84,22 @@ struct SettingsView: View {
         switch section {
         case .sound:       return viewModel.sound.displayName
         case .voice:       return soundSettings.speakSubdivisions ? "Counts subdivisions aloud" : "Beat numbers only"
+        case .groove:      return grooveSummary
         case .accents:     return "\(viewModel.accents.count)-beat pattern"
         case .visuals:     return settings.indicatorStyle.displayName
         case .borderFlash: return settings.borderFlashEnabled ? "On" : "Off"
         case .gapTrainer:  return viewModel.trainer.isEnabled ? "On" : "Off"
         case .recents:     return recents.recents.isEmpty ? "None yet" : "\(recents.recents.count) saved"
         }
+    }
+
+    /// A one-line summary of the Groove section: swing amount and/or the active cell, or "Off".
+    private var grooveSummary: String {
+        let swingPct = Int((viewModel.swing * 100).rounded())
+        var parts: [String] = []
+        if swingPct > 0 { parts.append("Swing \(swingPct)%") }
+        if viewModel.cell != .straight { parts.append(viewModel.cell.displayName) }
+        return parts.isEmpty ? "Off" : parts.joined(separator: " · ")
     }
 
     // MARK: - Voice

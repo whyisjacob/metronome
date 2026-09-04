@@ -16,6 +16,10 @@ final class RenderPlan {
     let sampleRate: Double
     /// Frames between consecutive clicks: `secondsPerTick × sampleRate`. May be fractional.
     let framesPerTick: Double
+    /// Swing amount (`0`…`1`), applied to off-beat pair members via `SwingGrid`. `0` ⇒ a straight grid.
+    let swing: Double
+    /// Idiomatic sixteenth-grid cell; `.straight` ⇒ every sixteenth sounds.
+    let cell: RhythmCell
     /// The gap-click trainer overlay. It changes only *which* beats sound, never *when* (see `GapTrainer`),
     /// so it is captured immutably here and consulted per tick by the audio thread. Disabled by default,
     /// which makes the whole plan behave byte-for-byte as before (the accuracy tests never enable it).
@@ -27,6 +31,8 @@ final class RenderPlan {
         self.accents = config.accents
         self.sampleRate = sampleRate
         self.framesPerTick = config.secondsPerTick * sampleRate
+        self.swing = config.swing
+        self.cell = config.cell
         self.trainer = trainer
     }
 
@@ -59,9 +65,11 @@ final class RenderPlan {
     }
 
     /// Absolute frame index (from playback start) of tick `n` — closed form, zero cumulative drift.
+    /// Swing shifts off-beat pair members via the shared `SwingGrid`; at `swing == 0` this is exactly
+    /// `round(n × framesPerTick)`, identical to `MetronomeConfiguration.frame(forTick:sampleRate:)`.
     @inline(__always)
     func frame(forTick n: Int) -> Int {
-        Int((Double(n) * framesPerTick).rounded())
+        SwingGrid.frame(forTick: n, ticksPerBeat: ticksPerBeat, framesPerTick: framesPerTick, swing: swing)
     }
 
     /// Emphasis of tick `n` (global tick index from playback start). A muted beat silences its whole span
@@ -71,7 +79,9 @@ final class RenderPlan {
         let beat = (n / ticksPerBeat) % beatsPerBar
         let beatAccent = accents.indices.contains(beat) ? accents[beat] : .normal
         if beatAccent == .muted { return .muted }
-        guard n % ticksPerBeat == 0 else { return .weak }
+        let pos = n % ticksPerBeat
+        if cell.silences(posInBeat: pos, ticksPerBeat: ticksPerBeat) { return .muted }  // cell-silenced tick
+        guard pos == 0 else { return .weak }
         return beatAccent.audioLevel
     }
 
