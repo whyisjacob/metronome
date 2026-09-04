@@ -21,7 +21,7 @@ final class RhythmCellTests: XCTestCase {
     private let expectations: [(cell: RhythmCell, sounding: Set<Int>)] = [
         (.dottedEighthSixteenth, [0, 3]),
         (.gallop,                [0, 2, 3]),
-        (.reverseGallop,         [0, 1, 3]),
+        (.reverseGallop,         [0, 1, 2]),   // two sixteenths (0,1) + an eighth on 2 that spans 3 → 3 silent
     ]
 
     func testCellsSoundExactlyTheirPatternOnTheSixteenthGrid() throws {
@@ -63,7 +63,9 @@ final class RhythmCellTests: XCTestCase {
                 "\(cell.displayName): sounded positions \(observed.sorted()) ≠ pattern \(sounding.sorted())")
 
             // The cell downbeat (position 0, here the bar's strong beat) is louder than an inner sixteenth
-            // (position 3 sounds in every cell) — the "accent the cell downbeat" requirement.
+            // the cell actually sounds — the "accent the cell downbeat" requirement. The inner position is
+            // taken per-cell (the lowest sounding position > 0), since not every cell sounds position 3
+            // (reverse gallop is [0,1,2]).
             func peak(atTick tick: Int) -> Float {
                 let f = base + Int((Double(tick) * framesPer16).rounded())
                 let end = min(f + 512, samples.count)
@@ -71,7 +73,8 @@ final class RhythmCellTests: XCTestCase {
                 for i in max(f, 0)..<end { p = max(p, abs(samples[i])) }
                 return p
             }
-            XCTAssertGreaterThan(peak(atTick: 0), peak(atTick: 3),
+            let innerSounding = sounding.subtracting([0]).min()!
+            XCTAssertGreaterThan(peak(atTick: 0), peak(atTick: innerSounding),
                 "\(cell.displayName): the cell downbeat must be louder than its inner sixteenth")
         }
     }

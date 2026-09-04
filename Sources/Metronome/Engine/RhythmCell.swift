@@ -13,7 +13,8 @@ import Foundation
 /// The patterns are the common ones:
 ///   * `.dottedEighthSixteenth` — `[0, 3]`: a dotted-eighth followed by a sixteenth (the "long–short").
 ///   * `.gallop` — `[0, 2, 3]`: eighth then two sixteenths (the classic "da-da-dat" gallop).
-///   * `.reverseGallop` — `[0, 1, 3]`: two sixteenths then an eighth (the reverse / "dat-da-da").
+///   * `.reverseGallop` — `[0, 1, 2]`: two sixteenths then an eighth (the reverse / "dat-da-da"). The
+///     closing eighth sounds on position 2 and sustains through position 3, so 3 is silent (not 1).
 enum RhythmCell: String, CaseIterable, Identifiable, Codable {
     /// Off — every sixteenth sounds (the plain, un-celled pulse). The default.
     case straight
@@ -29,7 +30,7 @@ enum RhythmCell: String, CaseIterable, Identifiable, Codable {
         case .straight:             return [0, 1, 2, 3]
         case .dottedEighthSixteenth: return [0, 3]
         case .gallop:               return [0, 2, 3]
-        case .reverseGallop:        return [0, 1, 3]
+        case .reverseGallop:        return [0, 1, 2]
         }
     }
 

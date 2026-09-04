@@ -25,26 +25,28 @@ a feature — everything below is built on top of it.**
   beat + subdivision state so they stay locked to the audio; the ring/dots/counter reflect subdivisions.
 - **Screen-border flash** — an optional edge flash on each beat with user-selectable accent-beat vs
   normal-beat colours, independent of the chosen indicator.
+- **On-device photo Smart Import** — take or pick a photo of a score and Maelzel reads its **starting
+  tempo** (`♩ = 120`, `=120`, or an Italian word like "Allegro") and **time signature** (`4/4`, `6/8`,
+  common-time `C` → 4/4, cut-time `¢` → 2/2) entirely on-device with Apple **Vision** OCR — no network,
+  privacy-friendly. The detection is shown as **editable** fields to confirm before it applies to the
+  metronome (or is saved as a song); nothing is auto-applied. The parsing is a pure, unit-tested function
+  (recognised strings → tempo/meter). *Stretch (not yet):* bar counting and mid-piece meter/tempo changes
+  to seed a multi-section tempo-map automatically.
 
 ## Queued
 
 In priority order:
 
-1. **On-device photo Smart Import** — snap a photo of a score and prefill a draft with Apple **Vision**
-   OCR: detect the **tempo marking** (e.g. `♩ = 120`, "Allegro") and the **time signature**, entirely
-   on-device (no network, privacy-friendly). *Stretch:* estimate **bar count**, and detect **mid-piece
-   meter changes** to seed a multi-section tempo-map automatically.
-
-2. **Custom built-in PDF sheet-music reader** — a PDFKit, forScore-style reader with tap-zone / half-page
+1. **Custom built-in PDF sheet-music reader** — a PDFKit, forScore-style reader with tap-zone / half-page
    navigation and **auto page-turns driven by the tempo map**. Preferred over depending on forScore.
 
-3. **forScore integration** — one-way MIDI **Control Change** output to auto-turn forScore pages and cue
+2. **forScore integration** — one-way MIDI **Control Change** output to auto-turn forScore pages and cue
    scores from the tempo map. (forScore has no SDK and listens for MIDI CC, not notes; keyboard-shortcut
    emulation is the fallback if CC proves insufficient.)
 
-4. **Apple Watch companion** — Digital Crown to set tempo, transport controls, and a downbeat haptic.
+3. **Apple Watch companion** — Digital Crown to set tempo, transport controls, and a downbeat haptic.
    (watchOS haptics are *not* sample-accurate and degrade at high tempo, so the Watch is a controller +
    coarse pulse, not the timing source of truth.)
 
-5. **Monetization** — a single **$5 one-time unlock** (StoreKit 2 non-consumable). **No subscription,
+4. **Monetization** — a single **$5 one-time unlock** (StoreKit 2 non-consumable). **No subscription,
    no ads.**

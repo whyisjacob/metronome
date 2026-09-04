@@ -58,6 +58,11 @@ targets:
         # A metronome uses no encryption beyond Apple-exempt OS APIs, so declare
         # export-compliance up front — this skips the manual prompt in TestFlight.
         ITSAppUsesNonExemptEncryption: false
+        # Photo Smart Import: read a score's tempo + time signature on-device with Vision OCR. The camera
+        # capture path needs NSCameraUsageDescription; PHPicker (library) technically needs no permission,
+        # but NSPhotoLibraryUsageDescription is declared for completeness / any future direct access.
+        NSCameraUsageDescription: "Maelzel uses the camera so you can photograph sheet music; it reads the tempo and time signature on your device."
+        NSPhotoLibraryUsageDescription: "Maelzel reads a photo of sheet music you choose to detect its tempo and time signature on your device."
         UILaunchScreen:
           UIColorName: ""
         # Background audio so the click keeps sounding when the screen locks or the app
