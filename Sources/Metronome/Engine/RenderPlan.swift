@@ -16,13 +16,46 @@ final class RenderPlan {
     let sampleRate: Double
     /// Frames between consecutive clicks: `secondsPerTick × sampleRate`. May be fractional.
     let framesPerTick: Double
+    /// The gap-click trainer overlay. It changes only *which* beats sound, never *when* (see `GapTrainer`),
+    /// so it is captured immutably here and consulted per tick by the audio thread. Disabled by default,
+    /// which makes the whole plan behave byte-for-byte as before (the accuracy tests never enable it).
+    let trainer: GapTrainer
 
-    init(config: MetronomeConfiguration, sampleRate: Double) {
+    init(config: MetronomeConfiguration, sampleRate: Double, trainer: GapTrainer = GapTrainer()) {
         self.ticksPerBeat = config.ticksPerBeat
         self.beatsPerBar = config.beatsPerBar
         self.accents = config.accents
         self.sampleRate = sampleRate
         self.framesPerTick = config.secondsPerTick * sampleRate
+        self.trainer = trainer
+    }
+
+    /// Seconds between two consecutive clicks (beats *and* subdivisions) — the inverse of the frame math.
+    @inline(__always)
+    var secondsPerTick: Double { sampleRate > 0 ? framesPerTick / sampleRate : 0 }
+
+    /// Shortest subdivision interval (seconds) at which a *spoken* counting syllable is still crisp enough
+    /// to be useful. Below this the engine clicks the subdivisions instead and speaks only the main-beat
+    /// numbers, so a fast tempo (or a fine subdivision) never smears the spoken count into mush.
+    static let minSpokenSubdivisionSeconds = 0.15
+
+    /// Whether Voice mode should *speak* the subdivision syllables at this tempo, or fall back to clicking
+    /// them. Main beats always speak their number; this governs only the in-between ticks.
+    @inline(__always)
+    var speaksSubdivisionSyllables: Bool {
+        ticksPerBeat <= 1 || secondsPerTick >= Self.minSpokenSubdivisionSeconds
+    }
+
+    /// The gap-click trainer's decision for tick `n` (a global tick index from playback start): whether to
+    /// sound it, silence it, or keep only a soft downbeat. Returns `.play` when the trainer is disabled,
+    /// so the default render path is unchanged. Timing is *never* affected — only whether a voice fires.
+    @inline(__always)
+    func trainerGate(forTick n: Int) -> GapTrainer.Gate {
+        guard trainer.isEnabled else { return .play }
+        let tpb = max(ticksPerBeat, 1)
+        let globalBeat = n / tpb
+        let posInBeat = n % tpb
+        return trainer.gate(globalBeat: globalBeat, beatsPerBar: beatsPerBar, posInBeat: posInBeat)
     }
 
     /// Absolute frame index (from playback start) of tick `n` — closed form, zero cumulative drift.

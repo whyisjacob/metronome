@@ -27,7 +27,7 @@ enum VoiceSampleFactory {
     static func renderSpokenNumbers(upTo maxNumber: Int, sampleRate: Double) -> [[Float]] {
         guard maxNumber >= 1, sampleRate > 0 else { return [] }
         let synth = AVSpeechSynthesizer()
-        let voice = AVSpeechSynthesisVoice(language: "en-US")   // nil ⇒ system default voice
+        let voice = bestVoice()   // enhanced/premium when installed, else the best available English voice
         var table: [[Float]] = []
         table.reserveCapacity(maxNumber)
         for n in 1...maxNumber {
@@ -45,7 +45,7 @@ enum VoiceSampleFactory {
     static func renderSyllables(sampleRate: Double) -> [[Float]] {
         guard sampleRate > 0 else { return [] }
         let synth = AVSpeechSynthesizer()
-        let voice = AVSpeechSynthesisVoice(language: "en-US")
+        let voice = bestVoice()
         let cases = VoiceSyllable.allCases
         var table = [[Float]](repeating: [], count: cases.count)
         for s in cases {
@@ -54,12 +54,25 @@ enum VoiceSampleFactory {
         return table.allSatisfy(\.isEmpty) ? [] : table
     }
 
+    /// A brisk speaking rate — a touch above the system default so each count is punchy and short (which
+    /// also helps it fit inside a fast beat), capped at the platform maximum.
+    static var speechRate: Float {
+        min(AVSpeechUtteranceDefaultSpeechRate * 1.15, AVSpeechUtteranceMaximumSpeechRate)
+    }
+    /// A slightly raised pitch reads as crisper and cuts through better than the default drone.
+    static let pitchMultiplier: Float = 1.06
+
     private static func renderOne(_ text: String,
                                   synth: AVSpeechSynthesizer,
                                   voice: AVSpeechSynthesisVoice?,
                                   sampleRate: Double) -> [Float] {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = voice
+        // Faster + punchier, and no dead air around the word so the syllable is as short as possible.
+        utterance.rate = speechRate
+        utterance.pitchMultiplier = pitchMultiplier
+        utterance.preUtteranceDelay = 0
+        utterance.postUtteranceDelay = 0
 
         var chunks: [AVAudioPCMBuffer] = []
         let done = DispatchSemaphore(value: 0)
@@ -76,7 +89,7 @@ enum VoiceSampleFactory {
         // Offline synthesis is fast; the timeout only guards against a callback that never signals.
         _ = done.wait(timeout: .now() + 5.0)
 
-        return trimLeadingSilence(resampleToMonoFloat(chunks, targetRate: sampleRate))
+        return trimSilence(resampleToMonoFloat(chunks, targetRate: sampleRate))
     }
 
     /// Converts the synthesizer's chunks (any format) to a single mono Float32 array at `targetRate`.
@@ -114,10 +127,78 @@ enum VoiceSampleFactory {
         return Array(UnsafeBufferPointer(start: ch, count: n))
     }
 
-    /// Drops leading samples below `threshold` so the word's onset is at frame 0. Trailing silence is
-    /// left as-is (harmless — it just decays after the beat).
-    private static func trimLeadingSilence(_ samples: [Float], threshold: Float = 0.02) -> [Float] {
-        guard let first = samples.firstIndex(where: { abs($0) >= threshold }) else { return samples }
-        return first == 0 ? samples : Array(samples[first...])
+    /// Trims near-silence from **both** ends: the leading trim puts the word's onset at frame 0 (so the
+    /// audible syllable lands exactly on the beat frame when the engine schedules the buffer there), and
+    /// the trailing trim drops the dead tail so the token is as short as possible — the difference between
+    /// a slow, laggy count and a tight one, and what lets a syllable fit inside a fast beat. Internal dips
+    /// below threshold (e.g. between the two parts of a word) are preserved; only the outer silence goes.
+    /// All-silence (nothing synthesized) returns empty, which the engine reads as "no buffer → click".
+    static func trimSilence(_ samples: [Float], threshold: Float = 0.02) -> [Float] {
+        guard let first = samples.firstIndex(where: { abs($0) >= threshold }),
+              let last = samples.lastIndex(where: { abs($0) >= threshold }) else { return [] }
+        if first == 0 && last == samples.count - 1 { return samples }
+        return Array(samples[first...last])
+    }
+
+    // MARK: - Voice selection (prefer a natural, high-quality voice)
+
+    /// A speech voice reduced to just what ranking needs, so the "prefer enhanced/premium, prefer en-US"
+    /// choice is a pure function that can be unit-tested without a synthesizer or a device voice catalog.
+    struct VoiceCandidate: Equatable {
+        let identifier: String
+        let language: String
+        /// 3 = premium, 2 = enhanced, 1 = default/compact — higher is more natural.
+        let qualityRank: Int
+    }
+
+    /// Picks the best installed English voice: prefer higher synthesis quality (premium > enhanced >
+    /// default), then a more-preferred locale, falling back to `en-US` if nothing better resolves. Chosen
+    /// once per pre-render (never on the audio thread).
+    static func bestVoice() -> AVSpeechSynthesisVoice? {
+        let candidates = AVSpeechSynthesisVoice.speechVoices().map {
+            VoiceCandidate(identifier: $0.identifier, language: $0.language, qualityRank: qualityRank($0.quality))
+        }
+        if let best = rankBestVoice(candidates), let voice = AVSpeechSynthesisVoice(identifier: best.identifier) {
+            return voice
+        }
+        return AVSpeechSynthesisVoice(language: "en-US")   // last resort (nil ⇒ system default)
+    }
+
+    /// Maps a system voice quality to a rank (higher = more natural). `.premium` is iOS 16+.
+    static func qualityRank(_ quality: AVSpeechSynthesisVoiceQuality) -> Int {
+        switch quality {
+        case .premium:  return 3
+        case .enhanced: return 2
+        default:        return 1   // .default / compact
+        }
+    }
+
+    /// Ranks candidates and returns the best, or `nil` if the list is empty. English voices are strongly
+    /// preferred (the count is in English); among them, higher quality wins, then a more-preferred locale,
+    /// with a stable identifier tiebreak so the choice is deterministic.
+    static func rankBestVoice(_ candidates: [VoiceCandidate],
+                              preferredLanguages: [String] = ["en-US", "en-GB", "en-AU", "en-IE", "en"]) -> VoiceCandidate? {
+        let english = candidates.filter { $0.language.lowercased().hasPrefix("en") }
+        let pool = english.isEmpty ? candidates : english
+        return pool.max { a, b in
+            if a.qualityRank != b.qualityRank { return a.qualityRank < b.qualityRank }
+            let ra = languageRank(a.language, preferredLanguages)
+            let rb = languageRank(b.language, preferredLanguages)
+            if ra != rb { return ra > rb }              // larger rank index = less preferred = "smaller"
+            return a.identifier > b.identifier          // stable, deterministic tiebreak
+        }
+    }
+
+    /// Index of the first preferred language that `language` matches (exact, or a region of it, or the
+    /// bare "en" catch-all); `preferred.count` when it matches none. Lower is more preferred.
+    static func languageRank(_ language: String, _ preferred: [String]) -> Int {
+        let lang = language.lowercased()
+        for (i, p) in preferred.enumerated() {
+            let pl = p.lowercased()
+            if lang == pl || lang.hasPrefix(pl + "-") || (pl == "en" && lang.hasPrefix("en")) {
+                return i
+            }
+        }
+        return preferred.count
     }
 }

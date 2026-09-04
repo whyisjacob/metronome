@@ -13,6 +13,11 @@ final class MetronomeViewModel: ObservableObject {
     @Published private(set) var config: MetronomeConfiguration
     @Published private(set) var isPlaying = false
 
+    /// The gap-click trainer overlay (silences beats for internal-time practice). Held here, applied to
+    /// the engine live; deliberately not part of `MetronomeConfiguration`, so it never affects Recents,
+    /// Songs, or persisted settings. Starts disabled every launch — a practice mode you opt into.
+    @Published private(set) var trainer = GapTrainer()
+
     // Visual beat indicator, refreshed by `pollPulse()` which the view drives at display rate.
     @Published private(set) var activeBeat: Int?
     @Published private(set) var activeAccent: AccentLevel = .normal
@@ -154,6 +159,38 @@ final class MetronomeViewModel: ObservableObject {
             }
             $0.accents = pattern
         }
+    }
+
+    // MARK: - Gap-click trainer
+
+    /// Turns the trainer on/off. Enabling random mode reseeds so each practice run is unpredictable
+    /// (the seed is fixed only for reproducible tests).
+    func setTrainerEnabled(_ on: Bool) {
+        updateTrainer {
+            $0.isEnabled = on
+            if on { $0.seed = UInt64.random(in: UInt64.min...UInt64.max) }
+        }
+    }
+
+    func setTrainerMode(_ mode: GapTrainer.Mode) { updateTrainer { $0.mode = mode } }
+    func setTrainerMutePercent(_ percent: Int)   { updateTrainer { $0.mutePercent = percent } }
+    func setTrainerBarsOn(_ bars: Int)           { updateTrainer { $0.barsOn = bars } }
+    func setTrainerBarsOff(_ bars: Int)          { updateTrainer { $0.barsOff = bars } }
+    func setTrainerKeepDownbeat(_ on: Bool)      { updateTrainer { $0.keepDownbeat = on } }
+    func setTrainerRampEnabled(_ on: Bool)       { updateTrainer { $0.rampEnabled = on } }
+    func setTrainerRampBars(_ bars: Int)         { updateTrainer { $0.rampBars = bars } }
+    func setTrainerRampMutePercentPeak(_ p: Int) { updateTrainer { $0.rampMutePercentPeak = p } }
+    func setTrainerRampBarsOffPeak(_ bars: Int)  { updateTrainer { $0.rampBarsOffPeak = bars } }
+
+    /// Draws a fresh random pattern without toggling anything else (a "reshuffle").
+    func reshuffleTrainer() { updateTrainer { $0.seed = UInt64.random(in: UInt64.min...UInt64.max) } }
+
+    private func updateTrainer(_ mutate: (inout GapTrainer) -> Void) {
+        var next = trainer
+        mutate(&next)
+        next = next.normalized()
+        trainer = next
+        engine.setTrainer(next)
     }
 
     /// Registers a tap-tempo tap using a monotonic clock and applies the resulting BPM.

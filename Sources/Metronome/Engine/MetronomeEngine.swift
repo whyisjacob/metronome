@@ -148,6 +148,9 @@ final class MetronomeEngine {
     // MARK: Current configuration (main thread)
 
     private(set) var currentConfig = MetronomeConfiguration()
+    /// The gap-click trainer overlay applied to single-tempo playback (never to songs). Held here so a
+    /// live toggle republishes the plan seamlessly; captured into every `RenderPlan` this engine builds.
+    private(set) var currentTrainer = GapTrainer()
     /// The song most recently handed to `startSong(_:)`, for reference by the UI/view model.
     private(set) var currentSong: Song?
     /// Which mode the last `start*` selected, so an interruption/route recovery resumes the right one.
@@ -161,9 +164,22 @@ final class MetronomeEngine {
     func update(_ config: MetronomeConfiguration) {
         currentConfig = config
         guard configuredSampleRate > 0 else { return }
-        let plan = RenderPlan(config: config, sampleRate: configuredSampleRate)
+        let plan = RenderPlan(config: config, sampleRate: configuredSampleRate, trainer: currentTrainer)
         control.withLock { $0.plan = plan }
         applySound(config.sound)
+    }
+
+    // MARK: - Gap-click trainer
+
+    /// Applies a new trainer overlay. Takes effect live: it republishes the single-tempo plan with the
+    /// new trainer captured, so beats start/stop being silenced immediately, with no timing disruption
+    /// (the swap is phase-compatible — same meter and subdivision — so the running grid is preserved).
+    /// Song mode is intentionally untouched; the trainer applies to single-tempo practice only.
+    func setTrainer(_ trainer: GapTrainer) {
+        currentTrainer = trainer
+        guard configuredSampleRate > 0 else { return }
+        let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate, trainer: trainer)
+        control.withLock { if $0.songPlan == nil { $0.plan = plan } }
     }
 
     // MARK: - Sound selection
@@ -229,7 +245,7 @@ final class MetronomeEngine {
         guard !isManualRendering else { return }
         try ensureRealtimeEngineRunning()
         applySound(currentConfig.sound)     // (re)build the selected timbre / voice at the live rate
-        let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate)
+        let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate, trainer: currentTrainer)
         songModeActive = false
         control.withLock {
             $0.plan = plan
@@ -389,7 +405,7 @@ final class MetronomeEngine {
     func renderOffline(config: MetronomeConfiguration, seconds: Double) throws -> [Float] {
         update(config)
         control.withLock {
-            $0.plan = RenderPlan(config: config, sampleRate: configuredSampleRate)
+            $0.plan = RenderPlan(config: config, sampleRate: configuredSampleRate, trainer: currentTrainer)
             $0.songPlan = nil
             $0.running = true
             $0.resetRequested = true
@@ -425,7 +441,7 @@ final class MetronomeEngine {
                                totalSeconds: Double) throws -> (samples: [Float], changeFrame: Int) {
         update(first)
         control.withLock {
-            $0.plan = RenderPlan(config: first, sampleRate: configuredSampleRate)
+            $0.plan = RenderPlan(config: first, sampleRate: configuredSampleRate, trainer: currentTrainer)
             $0.songPlan = nil
             $0.running = true
             $0.resetRequested = true
@@ -585,14 +601,27 @@ final class MetronomeEngine {
                 let offset = onset - blockStart
                 if offset >= 0 {
                     let level = plan.accentLevel(forTick: tick)
-                    // A muted beat emits no click (and speaks no number in Voice mode) but still
-                    // publishes its pulse, so the count and the on-screen beat keep advancing.
-                    if level != .muted {
-                        if atVoiceMode {
+                    // The gap-click trainer decides whether this beat sounds. It never shifts the onset —
+                    // only whether a voice fires — so the grid stays sample-accurate. `.play` when the
+                    // trainer is off (the default), so the path below is unchanged.
+                    let gate = plan.trainerGate(forTick: tick)
+                    // A muted beat (or a trainer-silenced one) emits no click / speaks no number, but the
+                    // pulse below is always published so the count and the on-screen beat keep advancing.
+                    if level != .muted && gate != .silence {
+                        if gate == .softDownbeat {
+                            // Trainer gap bar: keep only a soft downbeat as a reference, reusing the quiet
+                            // `.weak` buffer of the selected timbre (table 0 is the classic click in Voice
+                            // mode too), so you don't lose the bar.
+                            triggerVoice(table: 0, bufferIndex: AccentLevel.weak.rawValue, at: offset,
+                                         into: ablPtr, frameCount: frames, cutVoices: false)
+                        } else if atVoiceMode {
                             // Voice mode: speak the number/syllable for this tick exactly on its frame,
-                            // cutting any still-sounding previous spoken token. Unmapped ticks fall back
-                            // to a click so every subdivision stays audible.
-                            scheduleVoiceToken(plan.voiceToken(forTick: tick), level: level, at: offset,
+                            // cutting any still-sounding previous spoken token. At a tempo where a spoken
+                            // subdivision can't fit, speak only the main beats and click the subdivisions
+                            // (fast-tempo fallback) so the count is never lost; unmapped ticks click too.
+                            var token = plan.voiceToken(forTick: tick)
+                            if !plan.speaksSubdivisionSyllables, case .syllable = token { token = .none }
+                            scheduleVoiceToken(token, level: level, at: offset,
                                                into: ablPtr, frameCount: frames)
                         } else {
                             triggerVoice(table: 0, bufferIndex: level.rawValue, at: offset,

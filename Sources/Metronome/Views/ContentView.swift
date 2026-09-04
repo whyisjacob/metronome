@@ -42,6 +42,7 @@ struct ContentView: View {
                     MeterControlView(viewModel: viewModel)
                     SubdivisionControlView(viewModel: viewModel)
                     SoundControlView(viewModel: viewModel)
+                    TrainerControlView(viewModel: viewModel)
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
