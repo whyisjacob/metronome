@@ -6,6 +6,7 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
     case eighth
     case triplet
     case sixteenth
+    case thirtysecond
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
         case .eighth: return 2
         case .triplet: return 3
         case .sixteenth: return 4
+        case .thirtysecond: return 8
         }
     }
 
@@ -25,6 +27,7 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
         case .eighth: return "Eighth"
         case .triplet: return "Triplet"
         case .sixteenth: return "Sixteenth"
+        case .thirtysecond: return "32nd"
         }
     }
 
@@ -35,6 +38,7 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
         case .eighth: return "♫"
         case .triplet: return "³"
         case .sixteenth: return "♬"
+        case .thirtysecond: return "³²"
         }
     }
 }

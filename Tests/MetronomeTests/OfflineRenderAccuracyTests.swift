@@ -43,16 +43,20 @@ final class OfflineRenderAccuracyTests: XCTestCase {
 
     func testOnsetsMatchFirstPrinciplesGridWithZeroDrift() throws {
         // ≥3 tempos (40 / 120 / 208) and several time-signature × subdivision combinations, including
-        // odd/compound meters and every subdivision. The fastest inter-onset interval here is
-        // 208 BPM sixteenths ≈ 72 ms, comfortably longer than the 18 ms detection guard below.
+        // odd/compound meters and every subdivision (32nds included). The fastest inter-onset interval
+        // here is 208 BPM sixteenths ≈ 72 ms, comfortably longer than the 18 ms detection guard below;
+        // the 100 BPM 32nds ≈ 75 ms are next-fastest, still well clear of the guard.
         let cases: [Case] = [
-            Case(bpm: 40,  numerator: 4, denominator: 4, subdivision: .quarter,   ticksPerBeat: 1),
-            Case(bpm: 120, numerator: 4, denominator: 4, subdivision: .quarter,   ticksPerBeat: 1),
-            Case(bpm: 208, numerator: 4, denominator: 4, subdivision: .quarter,   ticksPerBeat: 1),
-            Case(bpm: 120, numerator: 3, denominator: 4, subdivision: .eighth,    ticksPerBeat: 2),
-            Case(bpm: 90,  numerator: 6, denominator: 8, subdivision: .sixteenth, ticksPerBeat: 4),
-            Case(bpm: 144, numerator: 7, denominator: 8, subdivision: .triplet,   ticksPerBeat: 3),
-            Case(bpm: 208, numerator: 4, denominator: 4, subdivision: .sixteenth, ticksPerBeat: 4),
+            Case(bpm: 40,  numerator: 4, denominator: 4, subdivision: .quarter,      ticksPerBeat: 1),
+            Case(bpm: 120, numerator: 4, denominator: 4, subdivision: .quarter,      ticksPerBeat: 1),
+            Case(bpm: 208, numerator: 4, denominator: 4, subdivision: .quarter,      ticksPerBeat: 1),
+            Case(bpm: 120, numerator: 3, denominator: 4, subdivision: .eighth,       ticksPerBeat: 2),
+            Case(bpm: 90,  numerator: 6, denominator: 8, subdivision: .sixteenth,    ticksPerBeat: 4),
+            Case(bpm: 144, numerator: 7, denominator: 8, subdivision: .triplet,      ticksPerBeat: 3),
+            Case(bpm: 208, numerator: 4, denominator: 4, subdivision: .sixteenth,    ticksPerBeat: 4),
+            // 32nd note (ticksPerBeat = 8) — the new subdivision, held to the same independent grid.
+            Case(bpm: 100, numerator: 4, denominator: 4, subdivision: .thirtysecond, ticksPerBeat: 8),
+            Case(bpm: 60,  numerator: 3, denominator: 4, subdivision: .thirtysecond, ticksPerBeat: 8),
         ]
 
         let seconds = 20.0
@@ -197,6 +201,67 @@ final class OfflineRenderAccuracyTests: XCTestCase {
         }
     }
 
+    /// Compound meters (6/8, 9/8, 12/8) render drift-free on the same independent grid AND accent the
+    /// dotted-quarter **group heads** (beats 1, 4, 7, 10) by default. The oracle is first-principles only:
+    /// with the base (quarter) subdivision each meter pulses `numerator` times per bar, so onset `k` is
+    /// `round(k · 60/BPM · sampleRate)` (1 tick/beat hard-coded, not read from the engine). The grouping's
+    /// job is proven by checking every group head renders louder than the inner pulse that follows it.
+    func testCompoundMetersGroupHeadAccentsAreDriftFree() throws {
+        for numerator in [6, 9, 12] {
+            let bpm = 132.0
+            let secondsPerBeat = 60.0 / bpm            // one eighth-pulse per beat tick
+            let framesPerBeat  = secondsPerBeat * sampleRate
+
+            let config = MetronomeConfiguration(
+                bpm: bpm,
+                timeSignature: TimeSignature(numerator: numerator, denominator: 8),
+                subdivision: .quarter
+            )
+            // The default accent pattern must mark exactly the group heads (every third beat).
+            var expectedAccents = [Bool](repeating: false, count: numerator)
+            for i in stride(from: 0, to: numerator, by: 3) { expectedAccents[i] = true }
+            XCTAssertEqual(config.accents, expectedAccents,
+                           "compound \(numerator)/8 must default to group-head accents")
+
+            let engine = MetronomeEngine()
+            try engine.prepareForOfflineRendering(sampleRate: sampleRate)
+            defer { engine.teardownOfflineRendering() }
+
+            let bars = 2
+            let seconds = Double(bars * numerator) * secondsPerBeat + 0.25
+            let samples = try engine.renderOffline(config: config, seconds: seconds)
+
+            let minGap = Int(0.018 * sampleRate)
+            let onsets = Self.detectOnsets(in: samples, minGap: minGap)
+            XCTAssertGreaterThanOrEqual(onsets.count, bars * numerator,
+                "expected ≥ \(bars * numerator) pulses for \(numerator)/8, got \(onsets.count)")
+
+            let base = onsets[0]
+            XCTAssertLessThanOrEqual(base, 1, "playback must begin on sample 0 for \(numerator)/8")
+
+            // (A) ZERO CUMULATIVE DRIFT on the independent pulse grid.
+            let comparable = min(onsets.count, bars * numerator)
+            for k in 0..<comparable {
+                let idealContinuous = Double(k) * framesPerBeat
+                let measured = Double(onsets[k] - base)
+                XCTAssertLessThan(abs(measured - idealContinuous), 1.0,
+                    "compound \(numerator)/8 onset \(k) drifted: measured \(measured), ideal \(idealContinuous)")
+            }
+
+            // (B) GROUP HEADS are accented: each of beats 0, 3, 6, 9 renders louder than the next pulse.
+            func peak(at frame: Int) -> Float {
+                let end = min(frame + 512, samples.count)
+                var p: Float = 0
+                for i in frame..<end { p = max(p, abs(samples[i])) }
+                return p
+            }
+            for head in stride(from: 0, to: comparable - 1, by: 3) {
+                XCTAssertGreaterThan(peak(at: onsets[head]), peak(at: onsets[head + 1]),
+                    "compound \(numerator)/8 group head at beat \(head) must be accented (louder)")
+            }
+        }
+    }
+
     /// Subdivision changes click density exactly as first principles predict (audio-level count).
     /// Expected counts are hand-derived, not taken from the engine.
     func testSubdivisionOnsetCounts() throws {
@@ -209,10 +274,12 @@ final class OfflineRenderAccuracyTests: XCTestCase {
             return Self.detectOnsets(in: samples, minGap: Int(0.018 * sampleRate)).count
         }
         // 60 BPM over 4 s (a beat every 1 s): quarter → clicks at 0,1,2,3 s = 4; eighth → 8;
-        // sixteenth → 16. (The click at exactly 4 s is past the render window and not produced.)
+        // sixteenth → 16; 32nd → 8 per beat × 4 = 32. (The click at exactly 4 s is past the render
+        // window and not produced.)
         XCTAssertEqual(try onsetCount(.quarter), 4)
         XCTAssertEqual(try onsetCount(.eighth), 8)
         XCTAssertEqual(try onsetCount(.sixteenth), 16)
+        XCTAssertEqual(try onsetCount(.thirtysecond), 32)
     }
 
     /// The accented downbeat renders louder than an unaccented beat (audio-level check).

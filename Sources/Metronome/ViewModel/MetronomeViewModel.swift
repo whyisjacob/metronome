@@ -100,15 +100,17 @@ final class MetronomeViewModel: ObservableObject {
 
     func setNumerator(_ numerator: Int) {
         updateConfig {
-            $0.timeSignature = TimeSignature(numerator: numerator,
-                                             denominator: $0.timeSignature.denominator)
+            let ts = TimeSignature(numerator: numerator, denominator: $0.timeSignature.denominator)
+            $0.timeSignature = ts
+            $0.accents = ts.defaultAccents   // adopt the new meter's sensible pattern (compound-aware)
         }
     }
 
     func setDenominator(_ denominator: Int) {
         updateConfig {
-            $0.timeSignature = TimeSignature(numerator: $0.timeSignature.numerator,
-                                             denominator: denominator)
+            let ts = TimeSignature(numerator: $0.timeSignature.numerator, denominator: denominator)
+            $0.timeSignature = ts
+            $0.accents = ts.defaultAccents   // e.g. 6/4 → 6/8 switches to dotted-quarter group accents
         }
     }
 

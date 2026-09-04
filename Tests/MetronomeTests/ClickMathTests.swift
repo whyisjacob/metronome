@@ -10,6 +10,7 @@ final class ClickMathTests: XCTestCase {
         XCTAssertEqual(Subdivision.eighth.ticksPerBeat, 2)
         XCTAssertEqual(Subdivision.triplet.ticksPerBeat, 3)
         XCTAssertEqual(Subdivision.sixteenth.ticksPerBeat, 4)
+        XCTAssertEqual(Subdivision.thirtysecond.ticksPerBeat, 8)   // 32nd = 8 clicks per beat
     }
 
     func testTimeSignatureClamping() {
@@ -128,5 +129,113 @@ final class ClickMathTests: XCTestCase {
         XCTAssertEqual(c.accentLevel(forTick: 1), .normal)
         XCTAssertEqual(c.accentLevel(forTick: 2), .strong)
         XCTAssertEqual(c.accentLevel(forTick: 3), .normal)
+    }
+
+    // MARK: - Compound meter grouping (6/8, 9/8, 12/8)
+
+    func testCompoundMeterDetection() {
+        XCTAssertTrue(TimeSignature(numerator: 6, denominator: 8).isCompound)
+        XCTAssertTrue(TimeSignature(numerator: 9, denominator: 8).isCompound)
+        XCTAssertTrue(TimeSignature(numerator: 12, denominator: 8).isCompound)
+        // Not compound: single-group 3/8, any /4 meter, and non-triple /8 numerators.
+        XCTAssertFalse(TimeSignature(numerator: 3, denominator: 8).isCompound)
+        XCTAssertFalse(TimeSignature(numerator: 6, denominator: 4).isCompound)
+        XCTAssertFalse(TimeSignature(numerator: 4, denominator: 8).isCompound)
+        XCTAssertFalse(TimeSignature(numerator: 7, denominator: 8).isCompound)
+        XCTAssertEqual(TimeSignature(numerator: 12, denominator: 8).compoundGroupCount, 4)
+    }
+
+    func testCompoundMetersDefaultToGroupHeadAccents() {
+        // Group heads (beats 1, 4, 7, 10) accented by default for compound meters.
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 8)).accents,
+                       [true, false, false, true, false, false])
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 9, denominator: 8)).accents,
+                       [true, false, false, true, false, false, true, false, false])
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 12, denominator: 8)).accents,
+                       [true, false, false, true, false, false, true, false, false, true, false, false])
+        // Simple meters unchanged: only the downbeat. 6/4 is duple-simple, NOT compound.
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: .common).accents, [true, false, false, false])
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 4)).accents,
+                       [true, false, false, false, false, false])
+        XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 3, denominator: 8)).accents,
+                       [true, false, false])
+    }
+
+    func testCompoundAccentLevelsMarkGroupHeads() {
+        // 6/8 at the base pulse: strong on beats 1 & 4 (group heads), normal on the inner pulses.
+        let c = MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 8),
+                                       subdivision: .quarter)
+        XCTAssertEqual(c.accentLevel(forTick: 0), .strong)   // group 1 head
+        XCTAssertEqual(c.accentLevel(forTick: 1), .normal)
+        XCTAssertEqual(c.accentLevel(forTick: 2), .normal)
+        XCTAssertEqual(c.accentLevel(forTick: 3), .strong)   // group 2 head
+        XCTAssertEqual(c.accentLevel(forTick: 4), .normal)
+        XCTAssertEqual(c.accentLevel(forTick: 5), .normal)
+        XCTAssertEqual(c.accentLevel(forTick: 6), .strong)   // next bar, group 1 head
+    }
+
+    // MARK: - Voice counting map (which spoken token lands on which tick — pure, no audio)
+
+    private func plan(_ bpm: Double = 120, _ ts: TimeSignature = .common, _ sub: Subdivision) -> RenderPlan {
+        RenderPlan(config: MetronomeConfiguration(bpm: bpm, timeSignature: ts, subdivision: sub),
+                   sampleRate: 48_000)
+    }
+
+    func testVoiceTokenQuarterSpeaksOnlyNumbers() {
+        let p = plan(120, .common, .quarter)
+        XCTAssertEqual(p.voiceToken(forTick: 0), .number(0))   // "one"
+        XCTAssertEqual(p.voiceToken(forTick: 1), .number(1))   // "two"
+        XCTAssertEqual(p.voiceToken(forTick: 4), .number(0))   // next bar → "one"
+    }
+
+    func testVoiceTokenEighthCountsAnd() {
+        let p = plan(120, .common, .eighth)   // "1 and 2 and …"
+        XCTAssertEqual(p.voiceToken(forTick: 0), .number(0))
+        XCTAssertEqual(p.voiceToken(forTick: 1), .syllable(.and))
+        XCTAssertEqual(p.voiceToken(forTick: 2), .number(1))
+        XCTAssertEqual(p.voiceToken(forTick: 3), .syllable(.and))
+    }
+
+    func testVoiceTokenSixteenthCountsEAndA() {
+        let p = plan(120, .common, .sixteenth)   // "1 e and a 2 e and a …"
+        XCTAssertEqual(p.voiceToken(forTick: 0), .number(0))
+        XCTAssertEqual(p.voiceToken(forTick: 1), .syllable(.e))
+        XCTAssertEqual(p.voiceToken(forTick: 2), .syllable(.and))
+        XCTAssertEqual(p.voiceToken(forTick: 3), .syllable(.a))
+        XCTAssertEqual(p.voiceToken(forTick: 4), .number(1))
+        XCTAssertEqual(p.voiceToken(forTick: 5), .syllable(.e))
+    }
+
+    func testVoiceTokenTripletCountsTripLet() {
+        let p = plan(120, .common, .triplet)   // "1 trip let 2 trip let …"
+        XCTAssertEqual(p.voiceToken(forTick: 0), .number(0))
+        XCTAssertEqual(p.voiceToken(forTick: 1), .syllable(.trip))
+        XCTAssertEqual(p.voiceToken(forTick: 2), .syllable(.letSub))
+        XCTAssertEqual(p.voiceToken(forTick: 3), .number(1))
+    }
+
+    func testVoiceTokenThirtySecondClicksBetweenBeats() {
+        // No concise standard syllables for 32nds: speak the beat number, click the in-between ticks.
+        let p = plan(120, .common, .thirtysecond)
+        XCTAssertEqual(p.voiceToken(forTick: 0), .number(0))
+        for t in 1..<8 { XCTAssertEqual(p.voiceToken(forTick: t), VoiceToken.none) }
+        XCTAssertEqual(p.voiceToken(forTick: 8), .number(1))
+    }
+
+    func testVoiceTokenCompoundCountsInGroups() {
+        // 6/8 felt in 2: "1 trip let 2 trip let" — group heads speak the group ordinal, inner pulses the
+        // triplet syllables, so the count reflects the dotted-quarter grouping.
+        let p = plan(120, TimeSignature(numerator: 6, denominator: 8), .quarter)
+        XCTAssertEqual(p.voiceToken(forTick: 0), .number(0))          // "one"  (group 1 head)
+        XCTAssertEqual(p.voiceToken(forTick: 1), .syllable(.trip))
+        XCTAssertEqual(p.voiceToken(forTick: 2), .syllable(.letSub))
+        XCTAssertEqual(p.voiceToken(forTick: 3), .number(1))          // "two"  (group 2 head)
+        XCTAssertEqual(p.voiceToken(forTick: 4), .syllable(.trip))
+        XCTAssertEqual(p.voiceToken(forTick: 5), .syllable(.letSub))
+        XCTAssertEqual(p.voiceToken(forTick: 6), .number(0))          // next bar → "one"
+
+        // 12/8 → four groups counted "1 … 2 … 3 … 4 …".
+        let q = plan(120, TimeSignature(numerator: 12, denominator: 8), .quarter)
+        XCTAssertEqual(q.voiceToken(forTick: 9), .number(3))          // "four" (group 4 head)
     }
 }

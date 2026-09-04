@@ -28,7 +28,10 @@ struct MetronomeConfiguration: Equatable, Codable {
         self.timeSignature = timeSignature
         self.subdivision = subdivision
         self.sound = sound
-        self.accents = MetronomeConfiguration.normalizedAccents(accents, count: timeSignature.numerator)
+        // With no explicit accents, adopt the meter's sensible default (downbeat for simple meters,
+        // every group head for compound 6/8-style meters) rather than a bare downbeat-only pattern.
+        self.accents = MetronomeConfiguration.normalizedAccents(accents ?? timeSignature.defaultAccents,
+                                                                count: timeSignature.numerator)
     }
 
     // Decode through the validating initializer (clamps bpm, re-sizes accents) and tolerate a missing

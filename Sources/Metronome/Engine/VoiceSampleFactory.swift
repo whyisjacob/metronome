@@ -37,6 +37,23 @@ enum VoiceSampleFactory {
         return table.allSatisfy(\.isEmpty) ? [] : table
     }
 
+    /// Renders the counting syllables ("and", "e", "a", "trip", "let") to mono Float buffers at
+    /// `sampleRate`, indexed by `VoiceSyllable.rawValue`. Identical pipeline to `renderSpokenNumbers`
+    /// (offline synth → convert to the engine format → trim so the syllable's onset is at frame 0), so a
+    /// scheduled syllable lands audibly on its subdivision tick. Returns `[]` if nothing synthesized, so
+    /// the engine falls back to clicking the subdivisions.
+    static func renderSyllables(sampleRate: Double) -> [[Float]] {
+        guard sampleRate > 0 else { return [] }
+        let synth = AVSpeechSynthesizer()
+        let voice = AVSpeechSynthesisVoice(language: "en-US")
+        let cases = VoiceSyllable.allCases
+        var table = [[Float]](repeating: [], count: cases.count)
+        for s in cases {
+            table[s.rawValue] = renderOne(s.spokenText, synth: synth, voice: voice, sampleRate: sampleRate)
+        }
+        return table.allSatisfy(\.isEmpty) ? [] : table
+    }
+
     private static func renderOne(_ text: String,
                                   synth: AVSpeechSynthesizer,
                                   voice: AVSpeechSynthesisVoice?,

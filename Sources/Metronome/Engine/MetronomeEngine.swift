@@ -59,6 +59,7 @@ final class MetronomeEngine {
         /// audio thread snapshots them with a cheap retain, never an allocation.
         var clickTable: [[Float]] = []      // the selected click timbre (single-tempo mode)
         var voiceTable: [[Float]] = []      // spoken numbers, indexed by beat (0 == "one"); may be empty
+        var voiceSyllableTable: [[Float]] = [] // spoken subdivision syllables, indexed by VoiceSyllable.rawValue
         var classicTable: [[Float]] = []    // always the classic click — song mode & fallback
         /// Single-tempo Voice mode: speak the beat number instead of clicking on beats.
         var voiceMode = false
@@ -107,7 +108,14 @@ final class MetronomeEngine {
     }
     private final class AudioThreadState {
         var framesElapsed = 0
+        /// Single-tempo cursor: the next tick to schedule, counted **relative to `epochFrame`** (not
+        /// from playback start). A live config swap re-anchors `epochFrame`/`nextTick` so the running
+        /// schedule continues seamlessly — see `anchorPlanSwap(to:blockStart:)`.
         var nextTick = 0
+        /// Absolute frame (from playback start) at which the current single-tempo plan's tick 0 sits.
+        /// Onset of tick `t` == `epochFrame + plan.frame(forTick: t)`. Zero at playback start; shifted
+        /// (by a whole-sample constant, so drift-free) whenever the live plan is swapped mid-playback.
+        var epochFrame = 0
         /// Song-mode cursor: the index of the next click to consider in `SongPlan`.
         var nextClickIndex = 0
         /// One-shot guard so the end-of-song pulse is published exactly once.
@@ -120,8 +128,13 @@ final class MetronomeEngine {
     // render block (a cheap COW retain). Only `render`/`mix` touch these, so there is no race.
     private var atSelectedTable: [[Float]] = []
     private var atVoiceTable: [[Float]] = []
+    private var atVoiceSyllableTable: [[Float]] = []
     private var atClassicTable: [[Float]] = []
     private var atVoiceMode = false
+    /// The single-tempo plan the audio thread is currently scheduling from. Compared by identity against
+    /// the published plan each block to detect a live swap (a new `RenderPlan` from `update(_:)`); `nil`
+    /// after a reset so the first plan anchors cleanly. Audio-thread-only, so no synchronization needed.
+    private var atPlan: RenderPlan?
     /// Length of the spoken-number release fade, in frames (set per sample rate). Read on the audio
     /// thread; written once in `installSourceNode` before audio flows.
     private var voiceReleaseFrames = 256
@@ -191,13 +204,17 @@ final class MetronomeEngine {
 
         let maxNumber = TimeSignature.numeratorRange.upperBound
         voiceRenderQueue.async { [weak self] in
-            let table = VoiceSampleFactory.renderSpokenNumbers(upTo: maxNumber, sampleRate: sr)
+            let numbers = VoiceSampleFactory.renderSpokenNumbers(upTo: maxNumber, sampleRate: sr)
+            let syllables = VoiceSampleFactory.renderSyllables(sampleRate: sr)
             guard let self else { return }
             self.control.withLock { c in
                 guard c.voiceRenderingRate == sr else { return }   // superseded by a rate change → drop
                 c.voiceRenderingRate = 0
-                if !table.isEmpty {
-                    c.voiceTable = table
+                // Publish only if the numbers rendered. Syllables may be empty (a headless environment,
+                // or a partial synth failure); the engine then simply clicks the subdivision ticks.
+                if !numbers.isEmpty {
+                    c.voiceTable = numbers
+                    c.voiceSyllableTable = syllables
                     c.voiceRate = sr
                 }
             }
@@ -326,6 +343,7 @@ final class MetronomeEngine {
             $0.classicTable = classic
             $0.clickTable = classic
             $0.voiceTable = []
+            $0.voiceSyllableTable = []
             $0.voiceMode = false
             $0.voiceRate = 0
             $0.voiceRenderingRate = 0
@@ -396,6 +414,30 @@ final class MetronomeEngine {
         return try drainOfflineRender(totalFrames: plan.totalFrames + tail)
     }
 
+    /// Renders the single-tempo click offline while switching from `first` to `second` partway through —
+    /// the deterministic analogue of changing settings (dragging the BPM slider, changing meter or
+    /// subdivision) mid-playback. It drives the **same live `update(_:)` path and render callback** the
+    /// UI uses, so what it verifies is the real live re-anchor, not a stand-in. Returns channel-0 samples
+    /// (index == absolute frame from playback start) and the frame at which `second` was published.
+    func renderOfflineChanging(from first: MetronomeConfiguration,
+                               to second: MetronomeConfiguration,
+                               changeAtSeconds: Double,
+                               totalSeconds: Double) throws -> (samples: [Float], changeFrame: Int) {
+        update(first)
+        control.withLock {
+            $0.plan = RenderPlan(config: first, sampleRate: configuredSampleRate)
+            $0.songPlan = nil
+            $0.running = true
+            $0.resetRequested = true
+        }
+        let changeFrame = Int((changeAtSeconds * configuredSampleRate).rounded())
+        let total = Int((totalSeconds * configuredSampleRate).rounded())
+        var samples = try drainOfflineRender(totalFrames: changeFrame)
+        update(second)   // publish the new config; the render callback re-anchors on the next block
+        samples += try drainOfflineRender(totalFrames: max(0, total - changeFrame))
+        return (samples, changeFrame)
+    }
+
     /// Pumps AVAudioEngine's offline manual rendering for `totalFrames` frames and returns channel-0
     /// samples. Shared by the single-tempo and song offline renderers so both drive the identical
     /// pull loop.
@@ -450,6 +492,7 @@ final class MetronomeEngine {
         var songPlan: SongPlan?
         var selectedTable: [[Float]] = []
         var voiceTable: [[Float]] = []
+        var voiceSyllableTable: [[Float]] = []
         var classicTable: [[Float]] = []
         var voiceMode = false
         control.withLockUnchecked { c in
@@ -458,12 +501,14 @@ final class MetronomeEngine {
             songPlan = c.songPlan
             selectedTable = c.clickTable
             voiceTable = c.voiceTable
+            voiceSyllableTable = c.voiceSyllableTable
             classicTable = c.classicTable
             voiceMode = c.voiceMode
             if c.resetRequested { c.resetRequested = false; didReset = true }
         }
         atSelectedTable = selectedTable
         atVoiceTable = voiceTable
+        atVoiceSyllableTable = voiceSyllableTable
         atClassicTable = classicTable
         atVoiceMode = voiceMode
 
@@ -475,8 +520,10 @@ final class MetronomeEngine {
         if didReset {
             atState.framesElapsed = 0
             atState.nextTick = 0
+            atState.epochFrame = 0
             atState.nextClickIndex = 0
             atState.songFinishedPublished = false
+            atPlan = nil                    // force a fresh anchor on the first plan after the reset
             for i in atState.voices.indices { atState.voices[i].active = false }
         }
 
@@ -519,20 +566,28 @@ final class MetronomeEngine {
                 publishSongFinished()
             }
         } else if let plan {
+            // A new plan published mid-playback (a live tempo/meter/subdivision/accent change) is
+            // re-anchored so the running schedule continues seamlessly — no gap, no double-trigger, and
+            // no drift introduced at the switch. After a reset `atPlan` is nil, so the first plan anchors
+            // at the current position.
+            if plan !== atPlan {
+                anchorPlanSwap(to: plan, blockStart: blockStart)
+                atPlan = plan
+            }
+
             var tick = atState.nextTick
             while true {
-                let onset = plan.frame(forTick: tick)
+                let onset = atState.epochFrame + plan.frame(forTick: tick)
                 if onset >= blockEnd { break }
                 let offset = onset - blockStart
                 if offset >= 0 {
                     let level = plan.accentLevel(forTick: tick)
-                    if atVoiceMode, let beat = plan.beatIndex(forTick: tick),
-                       beat < atVoiceTable.count, !atVoiceTable[beat].isEmpty {
-                        // Voice mode: speak the beat number (table 1) exactly on the beat frame, cutting
-                        // any still-sounding previous number. Subdivision ticks (beat == nil) fall through
-                        // to a click so the subdivision stays audible.
-                        triggerVoice(table: 1, bufferIndex: beat, at: offset,
-                                     into: ablPtr, frameCount: frames, cutVoices: true)
+                    if atVoiceMode {
+                        // Voice mode: speak the number/syllable for this tick exactly on its frame,
+                        // cutting any still-sounding previous spoken token. Unmapped ticks fall back to
+                        // a click so every subdivision stays audible.
+                        scheduleVoiceToken(plan.voiceToken(forTick: tick), level: level, at: offset,
+                                           into: ablPtr, frameCount: frames)
                     } else {
                         triggerVoice(table: 0, bufferIndex: level.rawValue, at: offset,
                                      into: ablPtr, frameCount: frames, cutVoices: false)
@@ -548,14 +603,72 @@ final class MetronomeEngine {
         return noErr
     }
 
+    /// Re-anchors the audio-thread schedule when the single-tempo plan is swapped mid-playback, so the
+    /// change takes effect promptly without a gap, a double-trigger, or any drift at the switch point.
+    ///
+    /// `anchor` is the frame of the next click that was already about to fire under the *old* plan (it is
+    /// ≥ `blockStart` and has not sounded yet). We keep that click on time and re-derive everything after
+    /// it from the new plan:
+    ///  * **Phase-compatible change** (same meter *and* subdivision — e.g. a BPM or accent/sound change):
+    ///    the beat/tick phase is preserved (`nextTick` unchanged); only the spacing after `anchor`
+    ///    changes. This is the BPM-slider case — the pulse keeps its place in the bar.
+    ///  * **Structural change** (meter or subdivision changed): the tick grid means something different,
+    ///    so the new pattern rebuilds from a fresh downbeat (`nextTick = 0`) at the next safe boundary.
+    ///
+    /// Within each segment onsets are `epochFrame + round(tick × framesPerTick)` — the same closed form
+    /// the accuracy tests prove — and `epochFrame`/`anchor` are always whole samples, so no segment
+    /// drifts and the join is sample-exact.
+    private func anchorPlanSwap(to new: RenderPlan, blockStart: Int) {
+        guard let old = atPlan else {
+            // First plan after a reset (or the very first plan): anchor tick 0 at the current position.
+            atState.epochFrame = blockStart
+            atState.nextTick = 0
+            return
+        }
+        let oldNextOnset = atState.epochFrame + old.frame(forTick: atState.nextTick)
+        let anchor = max(oldNextOnset, blockStart)
+        if old.numerator == new.numerator && old.ticksPerBeat == new.ticksPerBeat {
+            atState.epochFrame = anchor - new.frame(forTick: atState.nextTick)   // preserve phase
+        } else {
+            atState.epochFrame = anchor                                          // restart the bar
+            atState.nextTick = 0
+        }
+    }
+
+    /// Schedules the Voice sound for one tick: a spoken number (table 1) or subdivision syllable
+    /// (table 3), cutting the previous spoken token so words don't slur; a click fallback (table 0) when
+    /// the token is `.none` or its buffer has not rendered (e.g. a headless environment).
+    private func scheduleVoiceToken(_ token: VoiceToken, level: AccentLevel, at offset: Int,
+                                    into abl: UnsafeMutableAudioBufferListPointer, frameCount: Int) {
+        switch token {
+        case .number(let i):
+            if i >= 0, i < atVoiceTable.count, !atVoiceTable[i].isEmpty {
+                triggerVoice(table: 1, bufferIndex: i, at: offset,
+                             into: abl, frameCount: frameCount, cutVoices: true)
+                return
+            }
+        case .syllable(let s):
+            let idx = s.rawValue
+            if idx < atVoiceSyllableTable.count, !atVoiceSyllableTable[idx].isEmpty {
+                triggerVoice(table: 3, bufferIndex: idx, at: offset,
+                             into: abl, frameCount: frameCount, cutVoices: true)
+                return
+            }
+        case .none:
+            break
+        }
+        triggerVoice(table: 0, bufferIndex: level.rawValue, at: offset,
+                     into: abl, frameCount: frameCount, cutVoices: false)
+    }
+
     private func triggerVoice(table: Int, bufferIndex: Int, at offset: Int,
                               into abl: UnsafeMutableAudioBufferListPointer, frameCount: Int,
                               cutVoices: Bool) {
         if cutVoices {
-            // Start a short release on any still-sounding spoken number so the next one replaces it
-            // cleanly (a fade, not a hard stop, so there is no click at fast tempo).
+            // Start a short release on any still-sounding spoken token (number OR syllable) so the next
+            // one replaces it cleanly (a fade, not a hard stop, so there is no click at fast tempo).
             for i in atState.voices.indices
-            where atState.voices[i].active && atState.voices[i].table == 1 && atState.voices[i].fadeRemaining < 0 {
+            where atState.voices[i].active && isSpokenTable(atState.voices[i].table) && atState.voices[i].fadeRemaining < 0 {
                 atState.voices[i].fadeRemaining = voiceReleaseFrames
             }
         }
@@ -568,14 +681,20 @@ final class MetronomeEngine {
     }
 
     /// The buffer a voice reads from, by table id: 0 = selected click timbre, 1 = spoken number,
-    /// 2 = classic click (song mode / fallback).
+    /// 2 = classic click (song mode / fallback), 3 = spoken subdivision syllable.
     private func voiceBuffer(table: Int, index: Int) -> [Float]? {
         switch table {
         case 1:  return atVoiceTable.indices.contains(index) ? atVoiceTable[index] : nil
         case 2:  return atClassicTable.indices.contains(index) ? atClassicTable[index] : nil
+        case 3:  return atVoiceSyllableTable.indices.contains(index) ? atVoiceSyllableTable[index] : nil
         default: return atSelectedTable.indices.contains(index) ? atSelectedTable[index] : nil
         }
     }
+
+    /// A "spoken" voice — a number (table 1) or a syllable (table 3) — as opposed to a click. Successive
+    /// spoken tokens cross-fade so they never slur; clicks are left to ring.
+    @inline(__always)
+    private func isSpokenTable(_ table: Int) -> Bool { table == 1 || table == 3 }
 
     /// Mixes one voice's remaining samples into the block starting at `startFrame`, advancing its
     /// playhead and deactivating it when exhausted. A voice with `fadeRemaining >= 0` is played through
