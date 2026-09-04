@@ -27,8 +27,10 @@ platform :ios do
       in_house: false
     )
 
-    # gym/xcodebuild need the key as a FILE for -allowProvisioningUpdates auth.
-    # Write it OUTSIDE ./build so it can never land in the uploaded artifact.
+    # xcodebuild needs the key as a FILE so -authenticationKeyPath can use it to
+    # talk to Apple during the EXPORT step (where the App Store distribution
+    # certificate + provisioning profile are cloud-created). Write it OUTSIDE
+    # ./build so it can never land in the uploaded artifact.
     key_dir  = ENV["RUNNER_TEMP"] || Dir.tmpdir
     key_path = File.join(key_dir, "asc_api_key.p8")
     File.write(key_path, key_content)
@@ -53,14 +55,27 @@ platform :ios do
     # --- Build number: unique + increasing, from the CI run number ------------
     build_number = ENV["BUILD_NUMBER"] || "1"
 
-    # --- Signed Release archive (automatic, cloud-managed signing) ------------
+    # --- Archive UNSIGNED, then sign for App Store distribution at EXPORT ------
+    # WHY: `xcodebuild archive` with automatic signing resolves an iOS App
+    # *Development* provisioning profile, which Apple will only issue if the team
+    # has >= 1 registered device. This team intentionally has none, so a signed
+    # archive dies before export ("no devices from which to generate a
+    # provisioning profile ... couldn't find any iOS App Development profiles").
+    #
+    # App Store *Distribution* profiles need NO devices. So we archive without
+    # signing (CODE_SIGNING_ALLOWED=NO — hermetic, no Apple contact) and let the
+    # app-store EXPORT step cloud-create the distribution certificate + App Store
+    # profile via the API key (-allowProvisioningUpdates + -authenticationKey*)
+    # and sign the .ipa. `xcodebuild -exportArchive` re-signs wholesale, so an
+    # unsigned archive signs cleanly here. Export also registers the App ID for
+    # #{BUNDLE_ID} as a side effect (so it appears in the ASC "New App" dropdown).
     build_app(
       scheme: "Metronome",
       configuration: "Release",
       export_method: "app-store",
-      # -allowProvisioningUpdates + the API-key auth args let Xcode create/download
-      # the distribution certificate + App Store provisioning profile in the cloud.
-      xcargs: "-allowProvisioningUpdates #{auth} CURRENT_PROJECT_VERSION=#{build_number}",
+      # Archive: build the .app only — no signing, no network. (Bump the build #.)
+      xcargs: "CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION=#{build_number}",
+      # Export: cloud-managed automatic *distribution* signing via the API key.
       export_xcargs: "-allowProvisioningUpdates #{auth}",
       export_options: {
         signingStyle: "automatic",
