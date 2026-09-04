@@ -32,16 +32,32 @@ struct BeatIndicatorView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) { popped = false }
             }
 
+            beatDots
+        }
+    }
+
+    /// The per-beat dots. A tight centered row for common meters; a wrapping grid for large/odd meters
+    /// (up to 32 beats) so they never overflow the screen width.
+    @ViewBuilder
+    private var beatDots: some View {
+        let indices = Array(0..<max(beatCount, 1))
+        if beatCount <= 12 {
             HStack(spacing: 10) {
-                ForEach(Array(0..<max(beatCount, 1)), id: \.self) { i in
-                    Circle()
-                        .fill(Theme.beatColor(isActive: isPlaying && activeBeat == i,
-                                              accented: accents.indices.contains(i) && accents[i]))
-                        .frame(width: dotSize(for: i), height: dotSize(for: i))
-                        .animation(.easeOut(duration: 0.08), value: activeBeat)
-                }
+                ForEach(indices, id: \.self) { beatDot($0) }
+            }
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 18), spacing: 8)], spacing: 8) {
+                ForEach(indices, id: \.self) { beatDot($0) }
             }
         }
+    }
+
+    private func beatDot(_ i: Int) -> some View {
+        Circle()
+            .fill(Theme.beatColor(isActive: isPlaying && activeBeat == i,
+                                  accented: accents.indices.contains(i) && accents[i]))
+            .frame(width: dotSize(for: i), height: dotSize(for: i))
+            .animation(.easeOut(duration: 0.08), value: activeBeat)
     }
 
     private var discColor: Color {

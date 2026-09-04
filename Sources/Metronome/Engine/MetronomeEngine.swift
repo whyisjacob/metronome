@@ -45,10 +45,6 @@ final class MetronomeEngine {
     private var isManualRendering = false
     private var sessionWired = false
 
-    // MARK: Immutable audio data (generated once per sample rate, then read lock-free)
-
-    private var clickTable: [[Float]] = []
-
     // MARK: Shared state (main <-> audio thread)
 
     private struct Control {
@@ -58,6 +54,18 @@ final class MetronomeEngine {
         var songPlan: SongPlan?
         var running = false
         var resetRequested = false
+        /// Sound buffers, published under this lock so a live sound change is race-free. All three are
+        /// `[[Float]]` (indexed by accent level, or by beat for `voiceTable`) — COW value types, so the
+        /// audio thread snapshots them with a cheap retain, never an allocation.
+        var clickTable: [[Float]] = []      // the selected click timbre (single-tempo mode)
+        var voiceTable: [[Float]] = []      // spoken numbers, indexed by beat (0 == "one"); may be empty
+        var classicTable: [[Float]] = []    // always the classic click — song mode & fallback
+        /// Single-tempo Voice mode: speak the beat number instead of clicking on beats.
+        var voiceMode = false
+        /// Sample rate `voiceTable` was rendered at (0 = none) and the rate currently rendering in the
+        /// background (0 = idle). Guard the lazy voice render so it publishes/re-renders exactly once.
+        var voiceRate: Double = 0
+        var voiceRenderingRate: Double = 0
     }
     private let control = OSAllocatedUnfairLock(initialState: Control())
 
@@ -89,6 +97,13 @@ final class MetronomeEngine {
         var bufferIndex = 0
         var playhead = 0
         var active = false
+        /// Which buffer table this voice reads from: 0 = selected click timbre, 1 = spoken number,
+        /// 2 = classic click (song mode / fallback). A voice keeps its table across render blocks.
+        var table = 0
+        /// Linear release: <0 = play at full gain; ≥0 = frames of fade-out still to apply before the
+        /// voice is cut. Used to fade the previous spoken number when the next one starts, so numbers
+        /// don't slur or pile up at fast tempo.
+        var fadeRemaining = -1
     }
     private final class AudioThreadState {
         var framesElapsed = 0
@@ -100,6 +115,22 @@ final class MetronomeEngine {
         var voices = [Voice](repeating: Voice(), count: 16)
     }
     private let atState = AudioThreadState()
+
+    // Audio-thread-only working snapshots of the published sound buffers, refreshed at the top of every
+    // render block (a cheap COW retain). Only `render`/`mix` touch these, so there is no race.
+    private var atSelectedTable: [[Float]] = []
+    private var atVoiceTable: [[Float]] = []
+    private var atClassicTable: [[Float]] = []
+    private var atVoiceMode = false
+    /// Length of the spoken-number release fade, in frames (set per sample rate). Read on the audio
+    /// thread; written once in `installSourceNode` before audio flows.
+    private var voiceReleaseFrames = 256
+
+    // MARK: Voice pre-rendering (main-thread bookkeeping + a background render queue)
+
+    /// The click sound whose table is currently published, so `applySound` rebuilds only on a change.
+    private var installedClickSound: MetronomeSound?
+    private let voiceRenderQueue = DispatchQueue(label: "app.metronome.voice-render", qos: .userInitiated)
 
     // MARK: Current configuration (main thread)
 
@@ -119,6 +150,58 @@ final class MetronomeEngine {
         guard configuredSampleRate > 0 else { return }
         let plan = RenderPlan(config: config, sampleRate: configuredSampleRate)
         control.withLock { $0.plan = plan }
+        applySound(config.sound)
+    }
+
+    // MARK: - Sound selection
+
+    /// Publishes the buffers for `sound`: the click-timbre table used in single-tempo mode and, for
+    /// `.voice`, the lazy spoken-number render. Cheap unless the click timbre actually changed, and it
+    /// never blocks — voice buffers render on a background queue and publish when ready (until then Voice
+    /// mode falls back to clicks). Needs a known sample rate, so it runs from `start()` (after the
+    /// session is up) and from `update(_:)` while playing.
+    private func applySound(_ sound: MetronomeSound) {
+        guard configuredSampleRate > 0 else {
+            control.withLock { $0.voiceMode = sound.isVoice }
+            return
+        }
+        // Voice reuses the classic click for its subdivision ticks and as its pre-render fallback.
+        let clickSound: MetronomeSound = sound.isVoice ? .classic : sound
+        if installedClickSound != clickSound {
+            let table = ClickSoundFactory.makeClickTable(sampleRate: configuredSampleRate, sound: clickSound)
+            control.withLock { $0.clickTable = table }
+            installedClickSound = clickSound
+        }
+        control.withLock { $0.voiceMode = sound.isVoice }
+        if sound.isVoice { ensureVoiceRendered() }
+    }
+
+    /// Renders the spoken-number buffers once for the current sample rate on a background queue and
+    /// publishes them. Guarded through the control lock so it renders at most once per rate and a stale
+    /// render (after a rate change) is dropped rather than published over the current one.
+    private func ensureVoiceRendered() {
+        let sr = configuredSampleRate
+        guard sr > 0 else { return }
+        let shouldRender: Bool = control.withLock { c in
+            if c.voiceRate == sr || c.voiceRenderingRate == sr { return false }  // have it / rendering it
+            c.voiceRenderingRate = sr                                            // claim this rate
+            return true
+        }
+        guard shouldRender else { return }
+
+        let maxNumber = TimeSignature.numeratorRange.upperBound
+        voiceRenderQueue.async { [weak self] in
+            let table = VoiceSampleFactory.renderSpokenNumbers(upTo: maxNumber, sampleRate: sr)
+            guard let self else { return }
+            self.control.withLock { c in
+                guard c.voiceRenderingRate == sr else { return }   // superseded by a rate change → drop
+                c.voiceRenderingRate = 0
+                if !table.isEmpty {
+                    c.voiceTable = table
+                    c.voiceRate = sr
+                }
+            }
+        }
     }
 
     // MARK: - Real-time transport
@@ -128,6 +211,7 @@ final class MetronomeEngine {
     func start() throws {
         guard !isManualRendering else { return }
         try ensureRealtimeEngineRunning()
+        applySound(currentConfig.sound)     // (re)build the selected timbre / voice at the live rate
         let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate)
         songModeActive = false
         control.withLock {
@@ -230,7 +314,22 @@ final class MetronomeEngine {
             sourceNode = nil
         }
         configuredSampleRate = sampleRate
-        clickTable = ClickSoundFactory.makeClickTable(sampleRate: sampleRate)
+        voiceReleaseFrames = max(Int(0.005 * sampleRate), 32)
+
+        // Rebuild the classic click at this rate and publish it as both the default single-tempo table
+        // and the song-mode/fallback table. `applySound` (from start/update) then overlays the selected
+        // timbre or voice. A fresh engine — including the offline accuracy tests — therefore renders the
+        // classic click with no dependence on the sound-selection system.
+        let classic = ClickSoundFactory.makeClickTable(sampleRate: sampleRate, sound: .classic)
+        installedClickSound = nil
+        control.withLock {
+            $0.classicTable = classic
+            $0.clickTable = classic
+            $0.voiceTable = []
+            $0.voiceMode = false
+            $0.voiceRate = 0
+            $0.voiceRenderingRate = 0
+        }
 
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
             return
@@ -343,17 +442,30 @@ final class MetronomeEngine {
         let ablPtr = UnsafeMutableAudioBufferListPointer(abl)
         let frames = Int(frameCount)
 
-        // Snapshot the published control (tiny critical section).
+        // Snapshot the published control (tiny critical section). Copying the `[[Float]]` tables is a
+        // COW retain, not an allocation.
         var running = false
         var didReset = false
         var plan: RenderPlan?
         var songPlan: SongPlan?
+        var selectedTable: [[Float]] = []
+        var voiceTable: [[Float]] = []
+        var classicTable: [[Float]] = []
+        var voiceMode = false
         control.withLockUnchecked { c in
             running = c.running
             plan = c.plan
             songPlan = c.songPlan
+            selectedTable = c.clickTable
+            voiceTable = c.voiceTable
+            classicTable = c.classicTable
+            voiceMode = c.voiceMode
             if c.resetRequested { c.resetRequested = false; didReset = true }
         }
+        atSelectedTable = selectedTable
+        atVoiceTable = voiceTable
+        atClassicTable = classicTable
+        atVoiceMode = voiceMode
 
         // Start from silence; voices/ticks mix in additively.
         for buffer in ablPtr {
@@ -368,8 +480,8 @@ final class MetronomeEngine {
             for i in atState.voices.indices { atState.voices[i].active = false }
         }
 
-        guard running, !clickTable.isEmpty else {
-            return noErr    // paused: keep outputting silence, do not advance the grid
+        guard running, !atClassicTable.isEmpty else {
+            return noErr    // paused (or buffers not ready): output silence, do not advance the grid
         }
 
         // 1) Continue voices still sounding from earlier blocks.
@@ -392,8 +504,10 @@ final class MetronomeEngine {
                 let offset = onset - blockStart
                 if offset >= 0 {
                     let level = songPlan.accent(at: idx)
-                    triggerVoice(bufferIndex: level.rawValue, at: offset,
-                                 into: ablPtr, frameCount: frames)
+                    // Song mode always uses the classic click (table 2). The selected timbre/voice is a
+                    // single-tempo choice, so songs sound exactly as they always have.
+                    triggerVoice(table: 2, bufferIndex: level.rawValue, at: offset,
+                                 into: ablPtr, frameCount: frames, cutVoices: false)
                     publishSongPulse(plan: songPlan, index: idx, level: level)
                 }
                 idx += 1
@@ -412,8 +526,17 @@ final class MetronomeEngine {
                 let offset = onset - blockStart
                 if offset >= 0 {
                     let level = plan.accentLevel(forTick: tick)
-                    triggerVoice(bufferIndex: level.rawValue, at: offset,
-                                 into: ablPtr, frameCount: frames)
+                    if atVoiceMode, let beat = plan.beatIndex(forTick: tick),
+                       beat < atVoiceTable.count, !atVoiceTable[beat].isEmpty {
+                        // Voice mode: speak the beat number (table 1) exactly on the beat frame, cutting
+                        // any still-sounding previous number. Subdivision ticks (beat == nil) fall through
+                        // to a click so the subdivision stays audible.
+                        triggerVoice(table: 1, bufferIndex: beat, at: offset,
+                                     into: ablPtr, frameCount: frames, cutVoices: true)
+                    } else {
+                        triggerVoice(table: 0, bufferIndex: level.rawValue, at: offset,
+                                     into: ablPtr, frameCount: frames, cutVoices: false)
+                    }
                     publishPulse(tick: tick, plan: plan, level: level)
                 }
                 tick += 1
@@ -425,43 +548,80 @@ final class MetronomeEngine {
         return noErr
     }
 
-    private func triggerVoice(bufferIndex: Int, at offset: Int,
-                              into abl: UnsafeMutableAudioBufferListPointer, frameCount: Int) {
+    private func triggerVoice(table: Int, bufferIndex: Int, at offset: Int,
+                              into abl: UnsafeMutableAudioBufferListPointer, frameCount: Int,
+                              cutVoices: Bool) {
+        if cutVoices {
+            // Start a short release on any still-sounding spoken number so the next one replaces it
+            // cleanly (a fade, not a hard stop, so there is no click at fast tempo).
+            for i in atState.voices.indices
+            where atState.voices[i].active && atState.voices[i].table == 1 && atState.voices[i].fadeRemaining < 0 {
+                atState.voices[i].fadeRemaining = voiceReleaseFrames
+            }
+        }
         var slot = -1
         for i in atState.voices.indices where !atState.voices[i].active { slot = i; break }
-        if slot == -1 { slot = 0 }    // pool exhausted (won't happen with short clicks): steal slot 0
-        atState.voices[slot] = Voice(bufferIndex: bufferIndex, playhead: 0, active: true)
+        if slot == -1 { slot = 0 }    // pool exhausted (won't happen in practice): steal slot 0
+        atState.voices[slot] = Voice(bufferIndex: bufferIndex, playhead: 0, active: true,
+                                     table: table, fadeRemaining: -1)
         mix(voiceIndex: slot, into: abl, startFrame: offset, frameCount: frameCount)
     }
 
+    /// The buffer a voice reads from, by table id: 0 = selected click timbre, 1 = spoken number,
+    /// 2 = classic click (song mode / fallback).
+    private func voiceBuffer(table: Int, index: Int) -> [Float]? {
+        switch table {
+        case 1:  return atVoiceTable.indices.contains(index) ? atVoiceTable[index] : nil
+        case 2:  return atClassicTable.indices.contains(index) ? atClassicTable[index] : nil
+        default: return atSelectedTable.indices.contains(index) ? atSelectedTable[index] : nil
+        }
+    }
+
     /// Mixes one voice's remaining samples into the block starting at `startFrame`, advancing its
-    /// playhead and deactivating it when exhausted.
+    /// playhead and deactivating it when exhausted. A voice with `fadeRemaining >= 0` is played through
+    /// a linear release ramp and cut when the ramp completes. At full gain (`fadeRemaining < 0`) this is
+    /// the original click mix, sample-for-sample.
     private func mix(voiceIndex vi: Int, into abl: UnsafeMutableAudioBufferListPointer,
                      startFrame: Int, frameCount: Int) {
-        let bufIndex = atState.voices[vi].bufferIndex
-        guard clickTable.indices.contains(bufIndex) else {
+        guard let click = voiceBuffer(table: atState.voices[vi].table,
+                                      index: atState.voices[vi].bufferIndex) else {
             atState.voices[vi].active = false
             return
         }
-        let click = clickTable[bufIndex]                 // hoist inner array (one retain per block)
         let playhead = atState.voices[vi].playhead
         let remaining = click.count - playhead
         guard remaining > 0 else { atState.voices[vi].active = false; return }
         let n = min(remaining, frameCount - startFrame)
         guard n > 0 else { return }
 
+        let fade = atState.voices[vi].fadeRemaining
+        let releaseLen = max(voiceReleaseFrames, 1)
+
         click.withUnsafeBufferPointer { src in
             for buffer in abl {
                 guard let base = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
-                for k in 0..<n {
-                    base[startFrame + k] += src[playhead + k]
+                if fade < 0 {
+                    for k in 0..<n {
+                        base[startFrame + k] += src[playhead + k]
+                    }
+                } else {
+                    // Release ramp: gain falls from (fade/releaseLen) to 0 across the remaining frames.
+                    for k in 0..<n {
+                        let f = fade - k
+                        guard f > 0 else { break }
+                        base[startFrame + k] += src[playhead + k] * (Float(f) / Float(releaseLen))
+                    }
                 }
             }
         }
 
-        let newPlayhead = playhead + n
-        atState.voices[vi].playhead = newPlayhead
-        if newPlayhead >= click.count { atState.voices[vi].active = false }
+        atState.voices[vi].playhead = playhead + n
+        if fade >= 0 {
+            let newFade = fade - n
+            atState.voices[vi].fadeRemaining = newFade
+            if newFade <= 0 { atState.voices[vi].active = false; return }
+        }
+        if atState.voices[vi].playhead >= click.count { atState.voices[vi].active = false }
     }
 
     private func publishPulse(tick: Int, plan: RenderPlan, level: AccentLevel) {

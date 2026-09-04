@@ -3,6 +3,7 @@ import Combine
 
 struct ContentView: View {
     @ObservedObject var viewModel: MetronomeViewModel
+    @ObservedObject var recents: RecentsStore
 
     /// Display-rate ticker that refreshes the visual beat indicator. This is purely cosmetic — click
     /// timing is sample-accurate in the audio engine and never depends on this timer.
@@ -13,12 +14,12 @@ struct ContentView: View {
             Theme.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 20) {
-                    Text("METRONOME")
+                VStack(spacing: 16) {
+                    Text("MAELZEL")
                         .font(.system(size: 14, weight: .heavy, design: .rounded))
                         .tracking(4)
                         .foregroundStyle(Theme.textSecondary)
-                        .padding(.top, 8)
+                        .padding(.top, 4)
 
                     BeatIndicatorView(
                         beatCount: viewModel.timeSignature.numerator,
@@ -31,14 +32,18 @@ struct ContentView: View {
 
                     TempoControlView(viewModel: viewModel)
 
-                    MeterControlView(viewModel: viewModel)
-                    SubdivisionControlView(viewModel: viewModel)
-                    AccentRowView(viewModel: viewModel)
-
+                    // Start/Stop sits high — right under the tempo readout — so it's prominent and within
+                    // easy one-handed reach, not buried at the bottom of the scroll.
                     TransportButton(isPlaying: viewModel.isPlaying) {
                         viewModel.toggle()
                     }
-                    .padding(.top, 4)
+
+                    RecentsBar(recents: recents) { viewModel.load($0) }
+
+                    MeterControlView(viewModel: viewModel)
+                    SubdivisionControlView(viewModel: viewModel)
+                    SoundControlView(viewModel: viewModel)
+                    AccentRowView(viewModel: viewModel)
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
@@ -50,6 +55,6 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView(viewModel: MetronomeViewModel())
+    ContentView(viewModel: MetronomeViewModel(), recents: RecentsStore())
         .preferredColorScheme(.dark)
 }

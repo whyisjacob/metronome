@@ -15,15 +15,34 @@ struct MetronomeConfiguration: Equatable, Codable {
     var subdivision: Subdivision
     /// One flag per beat (`count == timeSignature.numerator`); `true` == accented.
     var accents: [Bool]
+    /// The click timbre, or the spoken-number Voice mode. Purely a sound choice — it has no effect on
+    /// timing, so `RenderPlan`/`SongPlan` ignore it; only the engine's buffer selection consults it.
+    var sound: MetronomeSound
 
     init(bpm: Double = 120,
          timeSignature: TimeSignature = .common,
          subdivision: Subdivision = .quarter,
-         accents: [Bool]? = nil) {
+         accents: [Bool]? = nil,
+         sound: MetronomeSound = .classic) {
         self.bpm = bpm.clamped(to: Self.tempoRange)
         self.timeSignature = timeSignature
         self.subdivision = subdivision
+        self.sound = sound
         self.accents = MetronomeConfiguration.normalizedAccents(accents, count: timeSignature.numerator)
+    }
+
+    // Decode through the validating initializer (clamps bpm, re-sizes accents) and tolerate a missing
+    // `sound` key so older/persisted configs still load. Encoding stays synthesized from `CodingKeys`.
+    enum CodingKeys: String, CodingKey { case bpm, timeSignature, subdivision, accents, sound }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let bpm = try c.decodeIfPresent(Double.self, forKey: .bpm) ?? 120
+        let ts = try c.decodeIfPresent(TimeSignature.self, forKey: .timeSignature) ?? .common
+        let sub = try c.decodeIfPresent(Subdivision.self, forKey: .subdivision) ?? .quarter
+        let accents = try c.decodeIfPresent([Bool].self, forKey: .accents)
+        let sound = try c.decodeIfPresent(MetronomeSound.self, forKey: .sound) ?? .classic
+        self.init(bpm: bpm, timeSignature: ts, subdivision: sub, accents: accents, sound: sound)
     }
 
     // MARK: - Derived timing
@@ -108,4 +127,26 @@ struct MetronomeConfiguration: Equatable, Codable {
         copy.accents = MetronomeConfiguration.normalizedAccents(accents, count: timeSignature.numerator)
         return copy
     }
+
+    // MARK: - Recents identity
+
+    /// The uniqueness key for the Recents feature: **everything except tempo**. Two configurations that
+    /// differ only in `bpm` share a key (so a BPM-only change updates the same recent in place), while a
+    /// change to meter, subdivision, accents, or sound yields a distinct key (a new/re-surfaced recent).
+    var settingsKey: SettingsKey {
+        SettingsKey(numerator: timeSignature.numerator,
+                    denominator: timeSignature.denominator,
+                    subdivision: subdivision,
+                    accents: accents,
+                    sound: sound)
+    }
+}
+
+/// A tempo-independent identity for a metronome configuration — see `MetronomeConfiguration.settingsKey`.
+struct SettingsKey: Equatable, Hashable, Codable {
+    var numerator: Int
+    var denominator: Int
+    var subdivision: Subdivision
+    var accents: [Bool]
+    var sound: MetronomeSound
 }

@@ -13,7 +13,10 @@ struct TimeSignature: Equatable, Hashable, Codable {
     let denominator: Int
 
     static let allowedDenominators = [2, 4, 8, 16]
-    static let numeratorRange = 1...16
+    /// Beats per bar. Widened to 32 so odd/large meters (5, 7, 11, 13, …) can be dialed in; the
+    /// engine, accent pattern, and `SongPlan` all handle an arbitrary numerator (they index by
+    /// `beat % numerator`), so nothing here is preset-bound.
+    static let numeratorRange = 1...32
 
     init(numerator: Int, denominator: Int) {
         self.numerator = numerator.clamped(to: TimeSignature.numeratorRange)

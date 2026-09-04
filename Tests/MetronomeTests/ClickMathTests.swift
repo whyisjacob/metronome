@@ -14,7 +14,9 @@ final class ClickMathTests: XCTestCase {
 
     func testTimeSignatureClamping() {
         XCTAssertEqual(TimeSignature(numerator: 0, denominator: 4).numerator, 1)
-        XCTAssertEqual(TimeSignature(numerator: 99, denominator: 4).numerator, 16)
+        XCTAssertEqual(TimeSignature(numerator: 99, denominator: 4).numerator, 32)  // widened cap (was 16)
+        XCTAssertEqual(TimeSignature(numerator: 32, denominator: 4).numerator, 32)  // max arbitrary numerator
+        XCTAssertEqual(TimeSignature(numerator: 11, denominator: 8).numerator, 11)  // odd meter preserved
         XCTAssertEqual(TimeSignature(numerator: 3, denominator: 3).denominator, 4)  // invalid → 4
         XCTAssertEqual(TimeSignature(numerator: 6, denominator: 8).denominator, 8)
     }

@@ -50,7 +50,9 @@ targets:
     info:
       path: Sources/Metronome/App/Info.plist
       properties:
-        CFBundleDisplayName: Metronome
+        # Home-screen name. Deliberately differs from the Xcode target/scheme name ("Metronome",
+        # which CI's `-scheme Metronome` depends on) and from the App Store name (Apple-side).
+        CFBundleDisplayName: Maelzel
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # A metronome uses no encryption beyond Apple-exempt OS APIs, so declare

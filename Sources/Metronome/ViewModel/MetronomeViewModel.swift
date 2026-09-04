@@ -22,15 +22,20 @@ final class MetronomeViewModel: ObservableObject {
     private let engine = MetronomeEngine()
     private var tapTempo = TapTempo()
     private var lastPulseSequence: UInt64 = 0
+    /// Optional Recents store: every committed configuration change is registered here.
+    private let recents: RecentsStore?
 
     // Read-through for views.
     var bpm: Double { config.bpm }
     var timeSignature: TimeSignature { config.timeSignature }
     var subdivision: Subdivision { config.subdivision }
     var accents: [Bool] { config.accents }
+    var sound: MetronomeSound { config.sound }
 
-    init(config: MetronomeConfiguration = MetronomeConfiguration()) {
+    init(config: MetronomeConfiguration = MetronomeConfiguration(),
+         recents: RecentsStore? = nil) {
         self.config = config
+        self.recents = recents
         engine.update(config)
         engine.onPlaybackStateChanged = { [weak self] playing in
             // Delivered on the main queue by the engine.
@@ -49,6 +54,7 @@ final class MetronomeViewModel: ObservableObject {
             return   // v1 stays silent on failure; surfacing audio errors is future work.
         }
         setPlaying(true)
+        recents?.remember(config)   // the config you actually played becomes/refreshes a recent
     }
 
     func stop() {
@@ -81,6 +87,16 @@ final class MetronomeViewModel: ObservableObject {
     func nudgeBPM(_ delta: Double) { setBPM((config.bpm + delta).rounded()) }
 
     func setSubdivision(_ subdivision: Subdivision) { updateConfig { $0.subdivision = subdivision } }
+
+    func setSound(_ sound: MetronomeSound) { updateConfig { $0.sound = sound } }
+
+    /// Loads a saved recent: applies its full configuration (restoring its BPM) and re-registers it so
+    /// it surfaces to the top of Recents. Playback state is unchanged.
+    func load(_ configuration: MetronomeConfiguration) {
+        config = configuration
+        engine.update(configuration)
+        recents?.remember(configuration)
+    }
 
     func setNumerator(_ numerator: Int) {
         updateConfig {
@@ -117,9 +133,11 @@ final class MetronomeViewModel: ObservableObject {
         let normalized = MetronomeConfiguration(bpm: next.bpm,
                                                 timeSignature: next.timeSignature,
                                                 subdivision: next.subdivision,
-                                                accents: next.accents)
+                                                accents: next.accents,
+                                                sound: next.sound)
         config = normalized
         engine.update(normalized)
+        recents?.remember(normalized)
     }
 
     // MARK: - Visual polling (called by the view at display rate)

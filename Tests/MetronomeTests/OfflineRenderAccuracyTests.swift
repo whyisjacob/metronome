@@ -129,6 +129,74 @@ final class OfflineRenderAccuracyTests: XCTestCase {
         }
     }
 
+    /// Custom **odd** numerators (5 and 11) — the meters the widened numerator range exists for — must
+    /// render drift-free AND accent beat 1 of every bar by default. The oracle is first-principles only:
+    /// onsets are `round(k · 60/BPM · sampleRate)` (quarter = 1 tick/beat, hard-coded here, not read from
+    /// the engine); the numerator's job is proven separately by checking the accented (louder) onsets land
+    /// on every numerator-th beat. This is the same independent discipline as the grid test above.
+    func testOddCustomNumeratorsAreDriftFreeWithDefaultDownbeatAccent() throws {
+        for numerator in [5, 11] {
+            let bpm = 132.0
+            let secondsPerBeat = 60.0 / bpm            // quarter note → 1 tick/beat
+            let framesPerBeat  = secondsPerBeat * sampleRate
+
+            let config = MetronomeConfiguration(
+                bpm: bpm,
+                timeSignature: TimeSignature(numerator: numerator, denominator: 4),
+                subdivision: .quarter
+            )
+            // The arbitrary numerator is preserved (it was capped at 16 before) and the default accent
+            // pattern marks only beat 1 — the fact the engine must honour for an odd meter.
+            XCTAssertEqual(config.timeSignature.numerator, numerator, "numerator \(numerator) must not be clamped")
+            XCTAssertEqual(config.accents.first, true)
+            XCTAssertFalse(config.accents.dropFirst().contains(true),
+                           "default pattern must accent only beat 1 for \(numerator)/4")
+
+            let engine = MetronomeEngine()
+            try engine.prepareForOfflineRendering(sampleRate: sampleRate)
+            defer { engine.teardownOfflineRendering() }
+
+            let bars = 3
+            let seconds = Double(bars * numerator) * secondsPerBeat + 0.25
+            let samples = try engine.renderOffline(config: config, seconds: seconds)
+
+            let minGap = Int(0.018 * sampleRate)
+            let onsets = Self.detectOnsets(in: samples, minGap: minGap)
+            XCTAssertGreaterThanOrEqual(onsets.count, bars * numerator,
+                "expected ≥ \(bars * numerator) beats for \(numerator)/4, got \(onsets.count)")
+
+            let base = onsets[0]
+            XCTAssertLessThanOrEqual(base, 1, "playback must begin on sample 0 for \(numerator)/4")
+
+            // (A) ZERO CUMULATIVE DRIFT on the independent quarter-note grid — the last beat as tight as
+            //     the first. (The numerator does not affect onset timing, only which onsets are accented.)
+            let comparable = min(onsets.count, bars * numerator)
+            for k in 0..<comparable {
+                let idealContinuous = Double(k) * framesPerBeat
+                let measured = Double(onsets[k] - base)
+                XCTAssertLessThan(abs(measured - idealContinuous), 1.0,
+                    "onset \(k) drifted for \(numerator)/4: measured \(measured), ideal \(idealContinuous)")
+            }
+
+            // (B) The DEFAULT accent lands on beat 1 of every bar for the arbitrary numerator: the onset
+            //     at each multiple of `numerator` is louder than the following (unaccented) beat. This
+            //     exercises the engine's accent math (beat = tick % numerator) on a non-preset meter.
+            func peak(at frame: Int) -> Float {
+                let end = min(frame + 512, samples.count)
+                var p: Float = 0
+                for i in frame..<end { p = max(p, abs(samples[i])) }
+                return p
+            }
+            for bar in 0..<bars {
+                let downbeat = bar * numerator
+                let nextBeat = downbeat + 1
+                guard nextBeat < comparable else { break }
+                XCTAssertGreaterThan(peak(at: onsets[downbeat]), peak(at: onsets[nextBeat]),
+                    "bar \(bar) downbeat must be accented (louder) for \(numerator)/4")
+            }
+        }
+    }
+
     /// Subdivision changes click density exactly as first principles predict (audio-level count).
     /// Expected counts are hand-derived, not taken from the engine.
     func testSubdivisionOnsetCounts() throws {

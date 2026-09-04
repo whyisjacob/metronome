@@ -1,8 +1,12 @@
 import SwiftUI
 
-/// Time-signature editor: numerator via a stepper (1–16), denominator via a segmented row {2,4,8,16}.
+/// Time-signature editor: an **arbitrary** numerator up to 32 via a stepper (for odd/large meters),
+/// quick-pick chips for common ones, and the denominator as a segmented row {2,4,8,16}.
 struct MeterControlView: View {
     @ObservedObject var viewModel: MetronomeViewModel
+
+    /// Fast access to common and odd meters; any other numerator (up to 32) is reachable via the stepper.
+    private static let quickNumerators = [2, 3, 4, 5, 6, 7, 9, 11, 13]
 
     var body: some View {
         Card("Time signature") {
@@ -19,6 +23,17 @@ struct MeterControlView: View {
                     in: TimeSignature.numeratorRange
                 )
                 .labelsHidden()
+            }
+
+            // Quick numerators (odd meters included). Arbitrary values up to 32 stay available via the stepper.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 46), spacing: 8)], spacing: 8) {
+                ForEach(Self.quickNumerators, id: \.self) { n in
+                    Button(action: { viewModel.setNumerator(n) }) {
+                        Text("\(n)")
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(SelectableStyle(isOn: viewModel.timeSignature.numerator == n))
+                }
             }
 
             HStack(spacing: 8) {

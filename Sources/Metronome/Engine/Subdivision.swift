@@ -1,7 +1,7 @@
 import Foundation
 
 /// How each beat (pulse) is divided into audible clicks.
-enum Subdivision: String, CaseIterable, Identifiable, Codable {
+enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
     case quarter
     case eighth
     case triplet
