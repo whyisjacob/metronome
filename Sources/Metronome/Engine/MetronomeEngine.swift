@@ -53,6 +53,9 @@ final class MetronomeEngine {
 
     private struct Control {
         var plan: RenderPlan?
+        /// Non-nil ⇒ song mode: the render callback walks this pre-expanded click stream instead of
+        /// the single-tempo `plan`. Exactly one of the two is active at a time.
+        var songPlan: SongPlan?
         var running = false
         var resetRequested = false
     }
@@ -60,11 +63,20 @@ final class MetronomeEngine {
 
     /// The most recent click the audio thread emitted, for the visual beat indicator. The UI polls
     /// this (e.g. via a display link / timer) and reacts when `sequence` advances.
+    ///
+    /// The `section*` / `songFinished` fields are populated only in song mode (nil / false otherwise),
+    /// so the UI can show the current section, the current bar, and stop cleanly at the end.
     struct BeatPulse: Equatable {
         var sequence: UInt64 = 0
         var tickIndex: Int = -1
         var beatIndex: Int?
         var accent: AccentLevel = .normal
+        /// Index of the section the latest click belongs to (song mode only).
+        var sectionIndex: Int?
+        /// 0-based bar within that section for the latest click (song mode only).
+        var barInSection: Int?
+        /// Set once when the song's final click has sounded and playback has reached the song's end.
+        var songFinished: Bool = false
     }
     private let pulse = OSAllocatedUnfairLock(initialState: BeatPulse())
 
@@ -81,6 +93,10 @@ final class MetronomeEngine {
     private final class AudioThreadState {
         var framesElapsed = 0
         var nextTick = 0
+        /// Song-mode cursor: the index of the next click to consider in `SongPlan`.
+        var nextClickIndex = 0
+        /// One-shot guard so the end-of-song pulse is published exactly once.
+        var songFinishedPublished = false
         var voices = [Voice](repeating: Voice(), count: 16)
     }
     private let atState = AudioThreadState()
@@ -88,6 +104,10 @@ final class MetronomeEngine {
     // MARK: Current configuration (main thread)
 
     private(set) var currentConfig = MetronomeConfiguration()
+    /// The song most recently handed to `startSong(_:)`, for reference by the UI/view model.
+    private(set) var currentSong: Song?
+    /// Which mode the last `start*` selected, so an interruption/route recovery resumes the right one.
+    private var songModeActive = false
     private(set) var isRunning = false
 
     // MARK: - Configuration
@@ -103,17 +123,48 @@ final class MetronomeEngine {
 
     // MARK: - Real-time transport
 
-    /// Starts (or restarts) the click from tick 0.
+    /// Starts (or restarts) the single-tempo click from tick 0. Clears any song plan so the two modes
+    /// never both drive the callback.
     func start() throws {
         guard !isManualRendering else { return }
         try ensureRealtimeEngineRunning()
         let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate)
+        songModeActive = false
         control.withLock {
             $0.plan = plan
+            $0.songPlan = nil
             $0.running = true
             $0.resetRequested = true
         }
         setRunning(true)
+    }
+
+    /// Starts a whole song from its first click. The tempo-map is expanded once into a `SongPlan`
+    /// (sample-accurate, zero drift across boundaries) and published to the *same* render callback
+    /// `start()` uses — song mode adds no timer/`asyncAfter` sounding, only a different onset source.
+    func startSong(_ song: Song) throws {
+        guard !isManualRendering else { return }
+        currentSong = song
+        try ensureRealtimeEngineRunning()
+        let plan = SongPlan(song: song, sampleRate: configuredSampleRate)
+        songModeActive = true
+        control.withLock {
+            $0.songPlan = plan
+            $0.plan = nil
+            $0.running = true
+            $0.resetRequested = true
+        }
+        setRunning(true)
+    }
+
+    /// Restarts whichever mode was last active — used by interruption/route recovery so a song resumes
+    /// as a song (from its start) rather than silently reverting to the single-tempo click.
+    private func restartCurrent() throws {
+        if songModeActive, let song = currentSong {
+            try startSong(song)
+        } else {
+            try start()
+        }
     }
 
     func stop() {
@@ -148,7 +199,7 @@ final class MetronomeEngine {
         }
         session.onInterruptionEnded = { [weak self] shouldResume in
             guard let self, self.isRunning, shouldResume else { return }
-            try? self.start()                  // rebuild session/engine and restart cleanly
+            try? self.restartCurrent()         // rebuild session/engine and restart cleanly
         }
         session.onRouteChange = { [weak self] reason in
             guard let self else { return }
@@ -158,7 +209,7 @@ final class MetronomeEngine {
                 if self.isRunning { self.stop() }
             case .newDeviceAvailable, .routeConfigurationChange, .override, .categoryChange:
                 if self.isRunning, self.session.sampleRate != self.configuredSampleRate {
-                    try? self.start()          // sample rate changed: rebuild at the new rate
+                    try? self.restartCurrent() // sample rate changed: rebuild at the new rate
                 }
             default:
                 break
@@ -169,7 +220,7 @@ final class MetronomeEngine {
             // The media server died and restarted: everything must be rebuilt.
             self.sourceNode = nil
             self.configuredSampleRate = 0
-            if self.isRunning { try? self.start() }
+            if self.isRunning { try? self.restartCurrent() }
         }
     }
 
@@ -215,18 +266,41 @@ final class MetronomeEngine {
         isManualRendering = true
     }
 
-    /// Renders `seconds` of audio offline and returns channel-0 float samples. The returned array's
-    /// index is the absolute frame from playback start, so onsets can be measured directly.
+    /// Renders `seconds` of the single-tempo click offline and returns channel-0 float samples. The
+    /// returned array's index is the absolute frame from playback start, so onsets can be measured
+    /// directly.
     func renderOffline(config: MetronomeConfiguration, seconds: Double) throws -> [Float] {
         update(config)
         control.withLock {
             $0.plan = RenderPlan(config: config, sampleRate: configuredSampleRate)
+            $0.songPlan = nil
             $0.running = true
             $0.resetRequested = true
         }
+        let totalFrames = Int((seconds * configuredSampleRate).rounded())
+        return try drainOfflineRender(totalFrames: totalFrames)
+    }
 
-        let sr = configuredSampleRate
-        let totalFrames = Int((seconds * sr).rounded())
+    /// Renders a whole `song` offline through the real song-mode render path and returns channel-0
+    /// float samples (index == absolute frame). Renders the song's exact integer length plus a short
+    /// tail so the final click's body is fully captured; no click exists at or after `totalFrames`,
+    /// so the tail cannot introduce a spurious onset.
+    func renderOfflineSong(_ song: Song) throws -> [Float] {
+        let plan = SongPlan(song: song, sampleRate: configuredSampleRate)
+        control.withLock {
+            $0.songPlan = plan
+            $0.plan = nil
+            $0.running = true
+            $0.resetRequested = true
+        }
+        let tail = Int((0.05 * configuredSampleRate).rounded())
+        return try drainOfflineRender(totalFrames: plan.totalFrames + tail)
+    }
+
+    /// Pumps AVAudioEngine's offline manual rendering for `totalFrames` frames and returns channel-0
+    /// samples. Shared by the single-tempo and song offline renderers so both drive the identical
+    /// pull loop.
+    private func drainOfflineRender(totalFrames: Int) throws -> [Float] {
         let capacity = avEngine.manualRenderingMaximumFrameCount
         guard let buffer = AVAudioPCMBuffer(pcmFormat: avEngine.manualRenderingFormat,
                                             frameCapacity: capacity) else {
@@ -273,9 +347,11 @@ final class MetronomeEngine {
         var running = false
         var didReset = false
         var plan: RenderPlan?
+        var songPlan: SongPlan?
         control.withLockUnchecked { c in
             running = c.running
             plan = c.plan
+            songPlan = c.songPlan
             if c.resetRequested { c.resetRequested = false; didReset = true }
         }
 
@@ -287,10 +363,12 @@ final class MetronomeEngine {
         if didReset {
             atState.framesElapsed = 0
             atState.nextTick = 0
+            atState.nextClickIndex = 0
+            atState.songFinishedPublished = false
             for i in atState.voices.indices { atState.voices[i].active = false }
         }
 
-        guard running, let plan, !clickTable.isEmpty else {
+        guard running, !clickTable.isEmpty else {
             return noErr    // paused: keep outputting silence, do not advance the grid
         }
 
@@ -299,23 +377,50 @@ final class MetronomeEngine {
             mix(voiceIndex: vi, into: ablPtr, startFrame: 0, frameCount: frames)
         }
 
-        // 2) Trigger every tick whose onset falls within this block: [blockStart, blockEnd).
+        // 2) Trigger every onset falling within this block: [blockStart, blockEnd).
         let blockStart = atState.framesElapsed
         let blockEnd = blockStart + frames
-        var tick = atState.nextTick
-        while true {
-            let onset = plan.frame(forTick: tick)
-            if onset >= blockEnd { break }
-            let offset = onset - blockStart
-            if offset >= 0 {
-                let level = plan.accentLevel(forTick: tick)
-                triggerVoice(bufferIndex: level.rawValue, at: offset,
-                             into: ablPtr, frameCount: frames)
-                publishPulse(tick: tick, plan: plan, level: level)
+
+        if let songPlan {
+            // Song mode: walk the pre-expanded click stream by index. Same voice scheduling as below;
+            // only the onset/accent source differs (an array lookup instead of the closed form).
+            let count = songPlan.clickCount
+            var idx = atState.nextClickIndex
+            while idx < count {
+                let onset = songPlan.frame(at: idx)
+                if onset >= blockEnd { break }
+                let offset = onset - blockStart
+                if offset >= 0 {
+                    let level = songPlan.accent(at: idx)
+                    triggerVoice(bufferIndex: level.rawValue, at: offset,
+                                 into: ablPtr, frameCount: frames)
+                    publishSongPulse(plan: songPlan, index: idx, level: level)
+                }
+                idx += 1
             }
-            tick += 1
+            atState.nextClickIndex = idx
+            // End of song: all clicks consumed and the playhead has reached the song's full length.
+            if idx >= count, !atState.songFinishedPublished, blockEnd >= songPlan.totalFrames {
+                atState.songFinishedPublished = true
+                publishSongFinished()
+            }
+        } else if let plan {
+            var tick = atState.nextTick
+            while true {
+                let onset = plan.frame(forTick: tick)
+                if onset >= blockEnd { break }
+                let offset = onset - blockStart
+                if offset >= 0 {
+                    let level = plan.accentLevel(forTick: tick)
+                    triggerVoice(bufferIndex: level.rawValue, at: offset,
+                                 into: ablPtr, frameCount: frames)
+                    publishPulse(tick: tick, plan: plan, level: level)
+                }
+                tick += 1
+            }
+            atState.nextTick = tick
         }
-        atState.nextTick = tick
+
         atState.framesElapsed = blockEnd
         return noErr
     }
@@ -366,6 +471,31 @@ final class MetronomeEngine {
             p.tickIndex = tick
             p.beatIndex = beat
             p.accent = level
+            p.sectionIndex = nil
+            p.barInSection = nil
+            p.songFinished = false
+        }
+    }
+
+    private func publishSongPulse(plan: SongPlan, index: Int, level: AccentLevel) {
+        let beat = plan.beatInBar(at: index)
+        let section = plan.sectionIndex(at: index)
+        let bar = plan.barInSection(at: index)
+        pulse.withLockUnchecked { p in
+            p.sequence &+= 1
+            p.tickIndex = index
+            p.beatIndex = beat
+            p.accent = level
+            p.sectionIndex = section
+            p.barInSection = bar
+            p.songFinished = false
+        }
+    }
+
+    private func publishSongFinished() {
+        pulse.withLockUnchecked { p in
+            p.sequence &+= 1          // bump so the UI poll notices even though no new click sounded
+            p.songFinished = true
         }
     }
 }

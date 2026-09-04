@@ -2,11 +2,9 @@ import SwiftUI
 
 @main
 struct MetronomeApp: App {
-    @StateObject private var viewModel = MetronomeViewModel()
-
     var body: some Scene {
         WindowGroup {
-            ContentView(viewModel: viewModel)
+            RootView()
                 .preferredColorScheme(.dark)   // dark, high-contrast, stage-friendly
         }
     }
