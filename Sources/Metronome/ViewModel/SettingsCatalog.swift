@@ -9,14 +9,15 @@ import Foundation
 /// fails until it is placed, and (for a Settings control) rendered under its section.
 enum AppControl: String, CaseIterable {
     // Absolute base — the things you touch constantly, kept on the main screen.
-    case tempo              // BPM readout, slider, ±1 nudges, tap tempo
+    case tempo              // BPM readout, roll-to-select wheel, ±1 nudges, tap tempo
     case transport          // Start / Stop
     case timeSignature      // meter (numerator/denominator, groupings)
     case subdivision        // quarter / eighth / triplet / sixteenth / 32nd
     case beatVisual         // the on-screen beat indicator
+    case sound              // click timbre + Voice mode — reached often, so it lives on the main screen
 
     // Everything else — consolidated into the single collapsible Settings screen.
-    case sound              // click timbre + Voice mode
+    case sectionBuilder     // entry point to the section / tempo-map builder (saves into the Songs library)
     case voiceCounting      // Voice: speak subdivisions aloud
     case swing              // swing / shuffle amount
     case rhythmCell         // idiomatic sixteenth-grid pattern picker
@@ -30,7 +31,7 @@ enum AppControl: String, CaseIterable {
 /// The collapsible groups on the unified Settings screen, in display order. The screen renders exactly
 /// these, and every non-base `AppControl` maps to one of them.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case sound
+    case sections
     case voice
     case groove
     case accents
@@ -43,7 +44,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .sound:       return "Sound"
+        case .sections:    return "Sections"
         case .voice:       return "Voice"
         case .groove:      return "Groove"
         case .accents:     return "Accents"
@@ -57,7 +58,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     /// SF Symbol shown on the section header.
     var systemImage: String {
         switch self {
-        case .sound:       return "speaker.wave.2.fill"
+        case .sections:    return "rectangle.stack.badge.plus"
         case .voice:       return "person.wave.2.fill"
         case .groove:      return "waveform.path"
         case .accents:     return "chart.bar.fill"
@@ -80,9 +81,9 @@ extension AppControl {
     /// to declare a home, and the test asserts the base set and that no section is left empty.
     var placement: ControlPlacement {
         switch self {
-        case .tempo, .transport, .timeSignature, .subdivision, .beatVisual:
+        case .tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound:
             return .mainScreen
-        case .sound:           return .settings(.sound)
+        case .sectionBuilder:  return .settings(.sections)
         case .voiceCounting:   return .settings(.voice)
         case .swing:           return .settings(.groove)
         case .rhythmCell:      return .settings(.groove)

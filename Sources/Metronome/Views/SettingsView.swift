@@ -10,11 +10,17 @@ struct SettingsView: View {
     @ObservedObject var viewModel: MetronomeViewModel
     @ObservedObject var soundSettings: SoundSettingsStore
     @ObservedObject var recents: RecentsStore
+    /// The Songs library — the section builder launched from here saves the sequence into it, exactly as
+    /// the Songs tab does.
+    @ObservedObject var store: SongStore
     @Environment(\.dismiss) private var dismiss
 
     /// Which sections are expanded. All collapsed by default, so opening Settings shows a clean, labelled
     /// map of every group (with a one-line current-value summary under each).
     @State private var expanded: Set<SettingsSection> = []
+    /// A fresh song being built via the "Sections" entry point. Non-nil presents the shared song builder;
+    /// nothing persists unless the builder's Save is tapped, so cancelling leaves no orphan behind.
+    @State private var buildingSong: Song?
 
     var body: some View {
         NavigationStack {
@@ -24,11 +30,17 @@ struct SettingsView: View {
                     VStack(spacing: 12) {
                         intro
                         ForEach(SettingsSection.allCases) { section in
-                            CollapsibleSection(title: section.title,
-                                               systemImage: section.systemImage,
-                                               subtitle: subtitle(for: section),
-                                               isExpanded: binding(for: section)) {
-                                content(for: section)
+                            // The section builder is a launcher, not a set of toggles — render it as a
+                            // one-tap entry rather than an expand-then-act collapsible.
+                            if section == .sections {
+                                sectionBuilderLauncher
+                            } else {
+                                CollapsibleSection(title: section.title,
+                                                   systemImage: section.systemImage,
+                                                   subtitle: subtitle(for: section),
+                                                   isExpanded: binding(for: section)) {
+                                    content(for: section)
+                                }
                             }
                         }
                     }
@@ -44,11 +56,52 @@ struct SettingsView: View {
                 }
             }
             .foregroundStyle(Theme.textPrimary)
+            .sheet(item: $buildingSong) { song in
+                SongBuilderView(song: song, store: store, settings: settings)
+                    .preferredColorScheme(.dark)
+            }
         }
     }
 
+    /// The discoverable entry point to the multi-section tempo-map builder. It reuses the *same* editor the
+    /// Songs tab uses (`SongBuilderView` over `SongSection`/`Song`), so building a sequence isn't hidden
+    /// behind the Songs library; saving from the builder drops the sequence into that library as usual.
+    private var sectionBuilderLauncher: some View {
+        Button {
+            buildingSong = Song(name: "New Sequence", sections: [SongSection(name: "Section 1")])
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: SettingsSection.sections.systemImage)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Theme.accentNormal)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Build a section sequence")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("Chain measures with their own tempo, meter & accents — saved to your Songs.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textSecondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.stroke))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the section builder to chain measures with changing tempo and meter")
+    }
+
     private var intro: some View {
-        Text("Everything beyond tempo, meter and Start lives here. Tap a section to expand it.")
+        Text("Tempo, meter and sound live on the main screen. Everything else — and a builder for multi-section sequences — lives here. Tap a section to expand it.")
             .font(.system(size: 13))
             .foregroundStyle(Theme.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -67,7 +120,7 @@ struct SettingsView: View {
 
     @ViewBuilder private func content(for section: SettingsSection) -> some View {
         switch section {
-        case .sound:       SoundControlView(viewModel: viewModel)
+        case .sections:    EmptyView()   // rendered as a launcher in the section loop, not here
         case .voice:       voiceSection
         case .groove:      GrooveControlView(viewModel: viewModel)
         case .accents:     AccentRowView(viewModel: viewModel)
@@ -82,7 +135,7 @@ struct SettingsView: View {
     /// status of every setting.
     private func subtitle(for section: SettingsSection) -> String {
         switch section {
-        case .sound:       return viewModel.sound.displayName
+        case .sections:    return ""      // the launcher supplies its own descriptive subtitle
         case .voice:       return soundSettings.speakSubdivisions ? "Counts subdivisions aloud" : "Beat numbers only"
         case .groove:      return grooveSummary
         case .accents:     return "\(viewModel.accents.count)-beat pattern"

@@ -7,10 +7,23 @@ import XCTest
 /// is left with no control, one of these fails.
 final class SettingsCatalogTests: XCTestCase {
 
-    /// The main screen is the absolute base only — tempo, transport, meter, subdivision, beat visual.
+    /// The main screen is the base controls only — tempo, transport, meter, subdivision, beat visual, and
+    /// (reached often) the sound picker.
     func testMainScreenHoldsOnlyTheBaseControls() {
         let onMain = AppControl.allCases.filter { $0.placement == .mainScreen }
-        XCTAssertEqual(Set(onMain), [.tempo, .transport, .timeSignature, .subdivision, .beatVisual])
+        XCTAssertEqual(Set(onMain), [.tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound])
+    }
+
+    /// Sound is a base, main-screen control — it must not also be stranded in a Settings section (a
+    /// control has exactly one home).
+    func testSoundIsABaseMainScreenControl() {
+        XCTAssertEqual(AppControl.sound.placement, .mainScreen)
+    }
+
+    /// The section-builder entry point lives in the "Sections" Settings section, so a multi-section
+    /// sequence can be built without first opening the Songs tab.
+    func testSectionBuilderLivesInTheSectionsSettingsSection() {
+        XCTAssertEqual(AppControl.sectionBuilder.placement, .settings(.sections))
     }
 
     /// Nothing is stranded: every control that isn't a base control lives in some Settings section.
@@ -34,7 +47,7 @@ final class SettingsCatalogTests: XCTestCase {
 
     func testSettingsSectionsAreTheExpectedEightInOrder() {
         XCTAssertEqual(SettingsSection.allCases.map(\.rawValue),
-                       ["sound", "voice", "groove", "accents", "visuals", "borderFlash", "gapTrainer", "recents"])
+                       ["sections", "voice", "groove", "accents", "visuals", "borderFlash", "gapTrainer", "recents"])
         for section in SettingsSection.allCases {
             XCTAssertFalse(section.title.isEmpty, "\(section) has no title")
             XCTAssertFalse(section.systemImage.isEmpty, "\(section) has no icon")

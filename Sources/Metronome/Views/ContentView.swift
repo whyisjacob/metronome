@@ -46,9 +46,18 @@ struct ContentView: View {
                     }
 
                     // Meter + subdivision stay on the main screen: they're changed constantly, and they're
-                    // the "current time signature + subdivision" readout. Everything else is in Settings.
+                    // the "current time signature + subdivision" readout.
                     MeterControlView(viewModel: viewModel)
                     SubdivisionControlView(viewModel: viewModel)
+
+                    // Sound is a base control too — reached often — so the picker lives on the main screen
+                    // (SoundControlView is card-less, so wrap it in the shared titled card here).
+                    Card("Sound") {
+                        SoundControlView(viewModel: viewModel)
+                    }
+
+                    // A subtle pointer to everything else, one tap away in the unified Settings.
+                    settingsTag
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
@@ -69,7 +78,7 @@ struct ContentView: View {
         .onReceive(ticker) { _ in viewModel.pollPulse() }
         .sheet(isPresented: $showSettings) {
             SettingsView(settings: settings, viewModel: viewModel,
-                         soundSettings: soundSettings, recents: recents)
+                         soundSettings: soundSettings, recents: recents, store: store)
                 .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showSmartImport) {
@@ -83,6 +92,25 @@ struct ContentView: View {
         } message: {
             Text("Saves the current tempo, meter, subdivision and accents as a new song in your library. You can add more sections later in the Songs tab.")
         }
+    }
+
+    /// A subtle, tappable tag at the bottom of the main screen: keeps the screen minimal while making
+    /// clear there's much more (voice, groove, accents, visuals, the trainer, the section builder…) one
+    /// tap away in the unified Settings.
+    private var settingsTag: some View {
+        Button { showSettings = true } label: {
+            HStack(spacing: 6) {
+                Text("Many more options in Settings")
+                    .font(.system(size: 13, weight: .semibold))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 12, weight: .bold))
+            }
+            .foregroundStyle(Theme.textSecondary)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 6)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Open Settings for more options")
     }
 
     private var header: some View {
