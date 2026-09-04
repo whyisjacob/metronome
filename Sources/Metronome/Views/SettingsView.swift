@@ -179,8 +179,20 @@ struct SettingsView: View {
                 }
                 .buttonStyle(PillButtonStyle())
             }
+
+            // Voice-sample credit. The clips are public domain (no attribution required); we credit the
+            // source as a courtesy — see VoiceSampleFactory / tools/generate_voice_samples.py.
+            Text(Self.voiceCredit)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    /// Attribution for the bundled Voice clips (voice: en_US-ljspeech-high — LJ Speech dataset, public
+    /// domain; Piper model trained by Bryce Beattie).
+    static let voiceCredit = "Voice samples generated with Piper from the “LJ Speech” dataset "
+        + "(public domain); model trained by Bryce Beattie."
 
     private var voiceExplainer: String {
         if viewModel.sound == .voice {

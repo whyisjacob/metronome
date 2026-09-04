@@ -3,12 +3,14 @@ import AVFoundation
 @testable import Metronome
 
 /// Tests for the Voice-quality work (feature 2): the pure, headless-testable pieces (trim-both-ends,
-/// higher-quality voice ranking, the fast-tempo speak-vs-click threshold) plus an end-to-end proof that
+/// aggressive syllable compaction, the fast-tempo speak-vs-click threshold) plus an end-to-end proof that
 /// at a fast tempo the count is never lost — a sound still lands on every subdivision tick.
 ///
-/// The actual rate/pitch/voice *sound* can't be asserted in a headless renderer (there may be no speech
-/// synthesis), so those are exercised for well-formedness; the decisions that govern them are unit-tested
-/// directly here.
+/// The Voice sound now plays PRE-GENERATED bundled clips (see `VoiceSampleFactory`), not live speech, so
+/// there is no on-device synthesizer or voice catalog to rank. The clips' actual *sound* can't be
+/// asserted in a headless renderer (the unit-test bundle may not carry the app's audio resources — the
+/// loader then returns `[]` and the engine clicks); the timing decisions that govern Voice mode are
+/// unit-tested directly here and on the sample-accurate click grid.
 final class VoiceQualityTests: XCTestCase {
 
     private let sampleRate = 44_100.0
@@ -34,44 +36,6 @@ final class VoiceQualityTests: XCTestCase {
     func testTrimSilenceNoOpWhenAlreadyTight() {
         let input: [Float] = [0.5, -0.5, 0.5]
         XCTAssertEqual(VoiceSampleFactory.trimSilence(input), input)
-    }
-
-    // MARK: - Prefer an enhanced / premium, English voice
-
-    func testVoiceRankingPrefersHigherQualityThenPreferredLocale() {
-        typealias C = VoiceSampleFactory.VoiceCandidate
-
-        // Quality dominates: the premium en-GB voice beats an enhanced/default en-US one.
-        let byQuality = [C(identifier: "a", language: "en-US", qualityRank: 1),
-                         C(identifier: "b", language: "en-US", qualityRank: 2),
-                         C(identifier: "c", language: "en-GB", qualityRank: 3)]
-        XCTAssertEqual(VoiceSampleFactory.rankBestVoice(byQuality)?.identifier, "c")
-
-        // Same quality ⇒ the more-preferred locale (en-US) wins.
-        let byLocale = [C(identifier: "x", language: "en-GB", qualityRank: 2),
-                        C(identifier: "y", language: "en-US", qualityRank: 2)]
-        XCTAssertEqual(VoiceSampleFactory.rankBestVoice(byLocale)?.identifier, "y")
-
-        // English is strongly preferred even over a higher-quality non-English voice.
-        let mixed = [C(identifier: "p", language: "en-AU", qualityRank: 1),
-                     C(identifier: "q", language: "de-DE", qualityRank: 3)]
-        XCTAssertEqual(VoiceSampleFactory.rankBestVoice(mixed)?.identifier, "p")
-
-        // No English at all ⇒ fall back to the best available.
-        let noEnglish = [C(identifier: "m", language: "de-DE", qualityRank: 1),
-                         C(identifier: "n", language: "fr-FR", qualityRank: 3)]
-        XCTAssertEqual(VoiceSampleFactory.rankBestVoice(noEnglish)?.identifier, "n")
-
-        XCTAssertNil(VoiceSampleFactory.rankBestVoice([]), "no candidates ⇒ nil (caller falls back)")
-    }
-
-    func testLanguageRank() {
-        let pref = ["en-US", "en-GB", "en"]
-        XCTAssertEqual(VoiceSampleFactory.languageRank("en-US", pref), 0)
-        XCTAssertEqual(VoiceSampleFactory.languageRank("en-GB", pref), 1)
-        XCTAssertEqual(VoiceSampleFactory.languageRank("en-AU", pref), 2)   // matches the "en" catch-all
-        XCTAssertEqual(VoiceSampleFactory.languageRank("EN-us", pref), 0)   // case-insensitive
-        XCTAssertEqual(VoiceSampleFactory.languageRank("fr-FR", pref), 3)   // no match ⇒ count
     }
 
     // MARK: - Fast-tempo: speak the subdivision only when it fits

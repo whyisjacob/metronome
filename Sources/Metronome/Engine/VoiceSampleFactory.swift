@@ -1,102 +1,113 @@
 import AVFoundation
 
-/// Pre-renders the spoken beat numbers ("one", "two", …) to PCM once, so the engine can schedule them
-/// sample-accurately on each beat frame — exactly like a click buffer, never via a per-beat
-/// `AVSpeechSynthesizer.speak` (which has unpredictable latency and could not land on the frame).
+/// Loads the Voice-mode audio — spoken beat numbers ("one", "two", …) and subdivision syllables
+/// ("and", "e", "a", "trip", "let") — from PRE-GENERATED, permissively-licensed clips bundled with the
+/// app, decodes them to PCM once, and hands them to the engine, which schedules them sample-accurately
+/// on each onset frame — exactly like a click buffer, never via a per-beat synthesizer call.
+///
+/// ## Why bundled clips, not live speech
+/// The Voice sound used to pre-render each utterance on device with `AVSpeechSynthesizer`. That was
+/// robotic, varied device-to-device, and each utterance was too long to land cleanly on a fast
+/// subdivision (a 16th "1 e and a" would smear/overlap). Pre-trimmed bundled clips fix all three:
+/// identical on every phone, and short/punchy enough that a whole "1 e and a" plays without slurring.
+///
+/// The clips are generated off-device by `tools/generate_voice_samples.py` with Piper
+/// (voice **en_US-ljspeech-high** — LJ Speech dataset, *public domain*; trained by Bryce Beattie), and
+/// ship as `Resources/Voice/voice_*.wav` (mono 16-bit PCM, 22.05 kHz): `voice_1`…`voice_32` speak the
+/// beat numbers, `voice_and/e/a/trip/let` the subdivision syllables.
 ///
 /// ## How
-///  1. `AVSpeechSynthesizer.write(_:toBufferCallback:)` renders each utterance offline into PCM chunks
-///     in the synthesizer's own format (rate/int-or-float vary by OS/voice). A zero-length buffer marks
-///     the end; a semaphore (with a timeout guard) waits for it on a background thread.
-///  2. The chunks are converted to the engine's format — **mono Float32 at `sampleRate`** — with a
-///     single `AVAudioConverter` pass, so the buffer plays back at the right pitch/speed and mixes into
-///     the render callback with no per-sample conversion.
-///  3. Leading near-silence is trimmed so the spoken word's onset is at frame 0 of the buffer. That is
-///     what makes the *audible* number land on the beat frame when the engine schedules the buffer
-///     there (the ONSET requirement), rather than a synthesizer-dependent number of silent samples late.
+///  1. Each clip is read from the app bundle into an `AVAudioPCMBuffer` (in the file's own format).
+///  2. It is converted to the engine's format — **mono Float32 at `sampleRate`** — with a single
+///     `AVAudioConverter` pass, so the buffer mixes into the render callback with no per-sample work.
+///  3. Leading/trailing near-silence is trimmed (numbers) / the syllable is compacted (syllables) so the
+///     spoken onset is at frame 0 of the buffer. That is what makes the *audible* token land on the beat
+///     frame when the engine schedules the buffer there (the ONSET requirement).
 ///
-/// This is **never** called at engine init or on the audio thread, and never by the accuracy tests —
-/// `MetronomeEngine` renders the table lazily on a background queue only when Voice is actually
-/// selected. If synthesis is unavailable (e.g. a headless environment), it returns `[]` and the engine
-/// simply falls back to clicks.
+/// This is **never** called on the audio thread and never by the accuracy tests — `MetronomeEngine`
+/// loads the table lazily on a background queue only when Voice is actually selected. If a clip is
+/// missing (e.g. a unit-test bundle that does not carry the app's resources), it returns `[]` and the
+/// engine simply falls back to clicks — so the count is never lost.
 enum VoiceSampleFactory {
 
-    /// Renders spoken numbers `1...maxNumber` to mono Float buffers at `sampleRate`. The result is
+    /// Loads spoken numbers `1...maxNumber` as mono Float buffers at `sampleRate`. The result is
     /// 0-indexed: element `i` is the spoken number `i + 1` (so beat index 0 → "one"). Returns `[]` if
-    /// nothing could be synthesized.
+    /// nothing could be loaded (⇒ the engine keeps using clicks).
     static func renderSpokenNumbers(upTo maxNumber: Int, sampleRate: Double) -> [[Float]] {
         guard maxNumber >= 1, sampleRate > 0 else { return [] }
-        let synth = AVSpeechSynthesizer()
-        let voice = bestVoice()   // enhanced/premium when installed, else the best available English voice
         var table: [[Float]] = []
         table.reserveCapacity(maxNumber)
         for n in 1...maxNumber {
-            table.append(renderOne(String(n), synth: synth, voice: voice, sampleRate: sampleRate))
+            // Trim so the spoken word's onset is at frame 0 (the ONSET requirement); the clip is already
+            // pre-trimmed and normalized, so in practice this only shaves a hair of lead-in.
+            table.append(trimSilence(loadClip(named: "voice_\(n)", sampleRate: sampleRate)))
         }
-        // If synthesis produced nothing at all, report failure so the engine keeps using clicks.
+        // If nothing loaded at all (e.g. resources absent), report failure so the engine keeps clicking.
         return table.allSatisfy(\.isEmpty) ? [] : table
     }
 
-    /// Renders the counting syllables ("and", "e", "a", "trip", "let") to mono Float buffers at
-    /// `sampleRate`, indexed by `VoiceSyllable.rawValue`. Identical pipeline to `renderSpokenNumbers`
-    /// (offline synth → convert to the engine format → trim so the syllable's onset is at frame 0), so a
-    /// scheduled syllable lands audibly on its subdivision tick. Returns `[]` if nothing synthesized, so
-    /// the engine falls back to clicking the subdivisions.
+    /// Loads the counting syllables ("and", "e", "a", "trip", "let") as mono Float buffers at
+    /// `sampleRate`, indexed by `VoiceSyllable.rawValue`. Each is compacted (onset at frame 0, hard length
+    /// cap with a fade) so it fits inside a fast subdivision tick and finishes before the next one — the
+    /// engine additionally hard-cuts the previous count at the next onset, so together they never slur or
+    /// overlap. Returns `[]` if nothing loaded, so the engine falls back to clicking the subdivisions.
     static func renderSyllables(sampleRate: Double) -> [[Float]] {
         guard sampleRate > 0 else { return [] }
-        let synth = AVSpeechSynthesizer()
-        let voice = bestVoice()
         let cases = VoiceSyllable.allCases
         var table = [[Float]](repeating: [], count: cases.count)
         for s in cases {
-            let raw = renderOne(s.spokenText, synth: synth, voice: voice, sampleRate: sampleRate)
-            // Syllables ("e", "and", "a", …) are aggressively compacted so they fit inside a fast
-            // subdivision tick and finish before the next one — the engine additionally hard-cuts the
-            // previous count at the next onset, so together they never slur or overlap.
+            // Filename stem == `VoiceSyllable.spokenText` (voice_and/e/a/trip/let.wav).
+            let raw = loadClip(named: "voice_\(s.spokenText)", sampleRate: sampleRate)
             table[s.rawValue] = compactSyllable(raw, sampleRate: sampleRate)
         }
         return table.allSatisfy(\.isEmpty) ? [] : table
     }
 
-    /// A brisk speaking rate — a touch above the system default so each count is punchy and short (which
-    /// also helps it fit inside a fast beat), capped at the platform maximum.
-    static var speechRate: Float {
-        min(AVSpeechUtteranceDefaultSpeechRate * 1.15, AVSpeechUtteranceMaximumSpeechRate)
-    }
-    /// A slightly raised pitch reads as crisper and cuts through better than the default drone.
-    static let pitchMultiplier: Float = 1.06
+    // MARK: - Bundled-clip loading
 
-    private static func renderOne(_ text: String,
-                                  synth: AVSpeechSynthesizer,
-                                  voice: AVSpeechSynthesisVoice?,
-                                  sampleRate: Double) -> [Float] {
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = voice
-        // Faster + punchier, and no dead air around the word so the syllable is as short as possible.
-        utterance.rate = speechRate
-        utterance.pitchMultiplier = pitchMultiplier
-        utterance.preUtteranceDelay = 0
-        utterance.postUtteranceDelay = 0
+    /// Anchors `Bundle(for:)` to this module so the loader can find the clips whether the code is running
+    /// in the shipping app or linked into a unit-test bundle.
+    private final class BundleToken {}
 
-        var chunks: [AVAudioPCMBuffer] = []
-        let done = DispatchSemaphore(value: 0)
-        var finished = false
+    /// The bundles to search for the Voice clips, most-likely first and de-duplicated. In the shipping app
+    /// the resources live in `Bundle.main`; when this code is linked into a test bundle we also try the
+    /// bundle it was loaded from, so a host that can see the resources exercises the real spoken path (and
+    /// one that cannot simply gets `[]` → clicks).
+    private static let candidateBundles: [Bundle] = {
+        var seen = Set<String>()
+        return [Bundle.main, Bundle(for: BundleToken.self)].filter { seen.insert($0.bundlePath).inserted }
+    }()
 
-        synth.write(utterance) { buffer in
-            guard let pcm = buffer as? AVAudioPCMBuffer else { return }
-            if pcm.frameLength == 0 {
-                if !finished { finished = true; done.signal() }
-                return
-            }
-            chunks.append(pcm)
+    /// Reads a bundled clip (`<name>.wav`) and converts it to a single mono Float32 array at `sampleRate`.
+    /// Runs off the audio thread (on the engine's background voice-render queue). Returns `[]` if the
+    /// resource is absent or unreadable, which the caller reads as "no buffer → click".
+    static func loadClip(named name: String, sampleRate: Double) -> [Float] {
+        guard sampleRate > 0, let url = clipURL(named: name),
+              let file = try? AVAudioFile(forReading: url) else { return [] }
+        let frameCount = AVAudioFrameCount(file.length)
+        guard frameCount > 0,
+              let input = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frameCount)
+        else { return [] }
+        do {
+            try file.read(into: input)
+        } catch {
+            return []
         }
-        // Offline synthesis is fast; the timeout only guards against a callback that never signals.
-        _ = done.wait(timeout: .now() + 5.0)
-
-        return trimSilence(resampleToMonoFloat(chunks, targetRate: sampleRate))
+        guard input.frameLength > 0 else { return [] }
+        return resampleToMonoFloat([input], targetRate: sampleRate)
     }
 
-    /// Converts the synthesizer's chunks (any format) to a single mono Float32 array at `targetRate`.
+    /// Locates `<name>.wav` in the first candidate bundle that carries it, or `nil` if none do.
+    private static func clipURL(named name: String) -> URL? {
+        for bundle in candidateBundles {
+            if let url = bundle.url(forResource: name, withExtension: "wav") { return url }
+        }
+        return nil
+    }
+
+    /// Converts PCM buffers (any format) to a single mono Float32 array at `targetRate` — one
+    /// `AVAudioConverter` pass, so the buffer plays back at the right pitch/speed and needs no per-sample
+    /// conversion in the render callback.
     private static func resampleToMonoFloat(_ chunks: [AVAudioPCMBuffer], targetRate: Double) -> [Float] {
         guard let srcFormat = chunks.first?.format else { return [] }
         let srcTotal = chunks.reduce(0) { $0 + Int($1.frameLength) }
@@ -136,7 +147,7 @@ enum VoiceSampleFactory {
     /// the trailing trim drops the dead tail so the token is as short as possible — the difference between
     /// a slow, laggy count and a tight one, and what lets a syllable fit inside a fast beat. Internal dips
     /// below threshold (e.g. between the two parts of a word) are preserved; only the outer silence goes.
-    /// All-silence (nothing synthesized) returns empty, which the engine reads as "no buffer → click".
+    /// All-silence (nothing loaded) returns empty, which the engine reads as "no buffer → click".
     static func trimSilence(_ samples: [Float], threshold: Float = 0.02) -> [Float] {
         guard let first = samples.firstIndex(where: { abs($0) >= threshold }),
               let last = samples.lastIndex(where: { abs($0) >= threshold }) else { return [] }
@@ -166,67 +177,5 @@ enum VoiceSampleFactory {
             capped[start + j] *= Float(fade - j) / Float(fade)
         }
         return capped
-    }
-
-    // MARK: - Voice selection (prefer a natural, high-quality voice)
-
-    /// A speech voice reduced to just what ranking needs, so the "prefer enhanced/premium, prefer en-US"
-    /// choice is a pure function that can be unit-tested without a synthesizer or a device voice catalog.
-    struct VoiceCandidate: Equatable {
-        let identifier: String
-        let language: String
-        /// 3 = premium, 2 = enhanced, 1 = default/compact — higher is more natural.
-        let qualityRank: Int
-    }
-
-    /// Picks the best installed English voice: prefer higher synthesis quality (premium > enhanced >
-    /// default), then a more-preferred locale, falling back to `en-US` if nothing better resolves. Chosen
-    /// once per pre-render (never on the audio thread).
-    static func bestVoice() -> AVSpeechSynthesisVoice? {
-        let candidates = AVSpeechSynthesisVoice.speechVoices().map {
-            VoiceCandidate(identifier: $0.identifier, language: $0.language, qualityRank: qualityRank($0.quality))
-        }
-        if let best = rankBestVoice(candidates), let voice = AVSpeechSynthesisVoice(identifier: best.identifier) {
-            return voice
-        }
-        return AVSpeechSynthesisVoice(language: "en-US")   // last resort (nil ⇒ system default)
-    }
-
-    /// Maps a system voice quality to a rank (higher = more natural). `.premium` is iOS 16+.
-    static func qualityRank(_ quality: AVSpeechSynthesisVoiceQuality) -> Int {
-        switch quality {
-        case .premium:  return 3
-        case .enhanced: return 2
-        default:        return 1   // .default / compact
-        }
-    }
-
-    /// Ranks candidates and returns the best, or `nil` if the list is empty. English voices are strongly
-    /// preferred (the count is in English); among them, higher quality wins, then a more-preferred locale,
-    /// with a stable identifier tiebreak so the choice is deterministic.
-    static func rankBestVoice(_ candidates: [VoiceCandidate],
-                              preferredLanguages: [String] = ["en-US", "en-GB", "en-AU", "en-IE", "en"]) -> VoiceCandidate? {
-        let english = candidates.filter { $0.language.lowercased().hasPrefix("en") }
-        let pool = english.isEmpty ? candidates : english
-        return pool.max { a, b in
-            if a.qualityRank != b.qualityRank { return a.qualityRank < b.qualityRank }
-            let ra = languageRank(a.language, preferredLanguages)
-            let rb = languageRank(b.language, preferredLanguages)
-            if ra != rb { return ra > rb }              // larger rank index = less preferred = "smaller"
-            return a.identifier > b.identifier          // stable, deterministic tiebreak
-        }
-    }
-
-    /// Index of the first preferred language that `language` matches (exact, or a region of it, or the
-    /// bare "en" catch-all); `preferred.count` when it matches none. Lower is more preferred.
-    static func languageRank(_ language: String, _ preferred: [String]) -> Int {
-        let lang = language.lowercased()
-        for (i, p) in preferred.enumerated() {
-            let pl = p.lowercased()
-            if lang == pl || lang.hasPrefix(pl + "-") || (pl == "en" && lang.hasPrefix("en")) {
-                return i
-            }
-        }
-        return preferred.count
     }
 }

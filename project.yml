@@ -45,6 +45,14 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: Sources/Metronome
+      # Pre-generated Voice-mode audio: spoken beat numbers (voice_1…voice_32) and subdivision syllables
+      # (voice_and/e/a/trip/let). Declared as an explicit `resources` build phase so the .wav clips are
+      # copied into the app bundle and found at runtime via Bundle.main.url(forResource:withExtension:).
+      # Kept OUTSIDE Sources/Metronome so the recursive source glob above does not also add them (a second
+      # reference would be a duplicate build file). Generated off-device by tools/generate_voice_samples.py
+      # (Piper, voice en_US-ljspeech-high — LJ Speech dataset, public domain; trained by Bryce Beattie).
+      - path: Resources/Voice
+        buildPhase: resources
     # XcodeGen writes (and auto-excludes from the copy phase) this Info.plist from the
     # properties below, so it does not need to be hand-maintained on Windows.
     info:
