@@ -1,0 +1,92 @@
+default_platform(:ios)
+
+# Fixed identity for this project.
+BUNDLE_ID = "app.metronome.mobile".freeze
+TEAM_ID   = "DBGYCM8364".freeze
+
+platform :ios do
+  desc "Build a signed Release archive and upload it to TestFlight.\n" \
+       "Uses an App Store Connect API key with automatic, cloud-managed signing " \
+       "(no manual certificates, no fastlane match)."
+  lane :beta do
+    # --- App Store Connect API key ---------------------------------------------
+    # key_content receives the full .p8 PEM text straight from the CI secret;
+    # fastlane writes it to a temp file itself. Nothing is printed.
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_KEY_P8"),
+      is_key_content_base64: false,
+      in_house: false
+    )
+
+    # --- Ensure the App Store Connect app record + bundle id exist -------------
+    # A build can only reach TestFlight if an app record already exists. Public
+    # App Store names are globally unique, so we reserve a distinctive name
+    # (override with ASC_APP_NAME). The owner can rename it later in App Store
+    # Connect; the name does not affect TestFlight installs.
+    app_name = ENV["ASC_APP_NAME"] || "Metronome by whyisjacob"
+    begin
+      create_app_online(
+        api_key: api_key,
+        app_identifier: BUNDLE_ID,
+        app_name: app_name,
+        language: "English",
+        sku: BUNDLE_ID,
+        company_name: "whyisjacob"
+      )
+    rescue => ex
+      msg = ex.message.to_s
+      if msg =~ /already exist|already been used|already taken|not available|duplicate/i
+        # Most likely our own app / bundle id already exists — safe to continue.
+        # If instead the *name* collided with someone else's app, the record was
+        # not created and the upload step below will fail with a clear
+        # "app could not be found" error.
+        UI.important("create_app_online: #{msg.strip} — assuming the app record already exists; continuing.")
+      else
+        UI.user_error!(
+          "Could not create the App Store Connect app record for #{BUNDLE_ID}.\n" \
+          "This is almost always an ACCOUNT-HOLDER action that can only be done in Apple's web UI:\n" \
+          "  1. Accept the latest Apple Developer Program License Agreement:\n" \
+          "     https://developer.apple.com/account  ->  Agreements\n" \
+          "  2. Accept the Paid/Free Applications agreement in App Store Connect:\n" \
+          "     https://appstoreconnect.apple.com  ->  Business / Agreements, Tax, and Banking\n" \
+          "  3. Confirm the App Store Connect API key has role App Manager or Admin.\n" \
+          "Original error: #{msg}"
+        )
+      end
+    end
+
+    # --- Build number: unique + increasing, from the CI run number ------------
+    build_number = ENV["BUILD_NUMBER"] || "1"
+
+    # --- Signed Release archive (automatic, cloud-managed signing) ------------
+    build_app(
+      scheme: "Metronome",
+      configuration: "Release",
+      export_method: "app-store",
+      api_key: api_key,
+      # -allowProvisioningUpdates lets Xcode create/download the distribution
+      # certificate + App Store provisioning profile via the API key.
+      xcargs: "-allowProvisioningUpdates CURRENT_PROJECT_VERSION=#{build_number}",
+      export_xcargs: "-allowProvisioningUpdates",
+      export_options: {
+        signingStyle: "automatic",
+        teamID: TEAM_ID
+      },
+      output_directory: "build",
+      output_name: "Metronome.ipa",
+      buildlog_path: "build/logs",
+      clean: true
+    )
+
+    # --- Upload to TestFlight; don't block CI on Apple's processing -----------
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: BUNDLE_ID,
+      skip_waiting_for_build_processing: true,
+      distribute_external: false,
+      notify_external_testers: false
+    )
+  end
+end

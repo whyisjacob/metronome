@@ -1,0 +1,6 @@
+# Authentication is entirely via the App Store Connect API key configured in the
+# Fastfile (ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8) — no Apple ID / password.
+app_identifier("app.metronome.mobile")
+
+# Apple Developer Program Team ID (used as a Spaceship fallback / for produce).
+team_id("DBGYCM8364")

@@ -1,0 +1,63 @@
+name: TestFlight upload
+
+# Manual only — never on push. Trigger from the Actions tab or with:
+#   gh workflow run testflight.yml -R whyisjacob/metronome --ref main
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    name: Build & upload to TestFlight
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        run: sudo xcode-select -switch /Applications/Xcode.app
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Set up Ruby + bundler
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Build signed archive & upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          # Unique, increasing CFBundleVersion for every run.
+          BUILD_NUMBER: ${{ github.run_number }}
+          # Keep fastlane output quiet + CI-friendly.
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+          FASTLANE_HIDE_CHANGELOG: "1"
+        run: bundle exec fastlane beta
+
+      - name: Upload IPA + build logs (debug artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-debug
+          path: |
+            build/**
+            fastlane/report.xml
+          if-no-files-found: warn
+          retention-days: 14

@@ -24,7 +24,10 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-    MARKETING_VERSION: "1.0.0"
+    # Marketing version shown in App Store / TestFlight. Build number
+    # (CURRENT_PROJECT_VERSION) is overridden per CI run — see the
+    # testflight.yml workflow (BUILD_NUMBER=github.run_number).
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
     # Placeholder Apple Team ID. No provisioning profiles are fabricated here;
     # signing is left to the Mac/CI (CI builds for the simulator, which is unsigned).
@@ -50,6 +53,9 @@ targets:
         CFBundleDisplayName: Metronome
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # A metronome uses no encryption beyond Apple-exempt OS APIs, so declare
+        # export-compliance up front — this skips the manual prompt in TestFlight.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: ""
         # Background audio so the click keeps sounding when the screen locks or the app
