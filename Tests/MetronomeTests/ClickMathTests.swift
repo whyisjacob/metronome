@@ -435,11 +435,11 @@ final class ClickMathTests: XCTestCase {
         XCTAssertEqual(level(.gallop, 2), .weak)
         XCTAssertEqual(level(.gallop, 3), .weak)
 
-        // Reverse gallop = [0, 1, 3].
+        // Reverse gallop = [0, 1, 2]: two sixteenths then an eighth (on 2, spanning 3), so 3 is silent.
         XCTAssertEqual(level(.reverseGallop, 0), .strong)
         XCTAssertEqual(level(.reverseGallop, 1), .weak)
-        XCTAssertEqual(level(.reverseGallop, 2), .muted)
-        XCTAssertEqual(level(.reverseGallop, 3), .weak)
+        XCTAssertEqual(level(.reverseGallop, 2), .weak)
+        XCTAssertEqual(level(.reverseGallop, 3), .muted)
 
         // Straight (Off): every sixteenth sounds.
         XCTAssertEqual(level(.straight, 1), .weak)
