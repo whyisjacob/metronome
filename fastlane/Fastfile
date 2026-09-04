@@ -20,42 +20,15 @@ platform :ios do
       in_house: false
     )
 
-    # --- Ensure the App Store Connect app record + bundle id exist -------------
-    # A build can only reach TestFlight if an app record already exists. Public
-    # App Store names are globally unique, so we reserve a distinctive name
-    # (override with ASC_APP_NAME). The owner can rename it later in App Store
-    # Connect; the name does not affect TestFlight installs.
-    app_name = ENV["ASC_APP_NAME"] || "Metronome by whyisjacob"
-    begin
-      create_app_online(
-        api_key: api_key,
-        app_identifier: BUNDLE_ID,
-        app_name: app_name,
-        language: "English",
-        sku: BUNDLE_ID,
-        company_name: "whyisjacob"
-      )
-    rescue => ex
-      msg = ex.message.to_s
-      if msg =~ /already exist|already been used|already taken|not available|duplicate/i
-        # Most likely our own app / bundle id already exists — safe to continue.
-        # If instead the *name* collided with someone else's app, the record was
-        # not created and the upload step below will fail with a clear
-        # "app could not be found" error.
-        UI.important("create_app_online: #{msg.strip} — assuming the app record already exists; continuing.")
-      else
-        UI.user_error!(
-          "Could not create the App Store Connect app record for #{BUNDLE_ID}.\n" \
-          "This is almost always an ACCOUNT-HOLDER action that can only be done in Apple's web UI:\n" \
-          "  1. Accept the latest Apple Developer Program License Agreement:\n" \
-          "     https://developer.apple.com/account  ->  Agreements\n" \
-          "  2. Accept the Paid/Free Applications agreement in App Store Connect:\n" \
-          "     https://appstoreconnect.apple.com  ->  Business / Agreements, Tax, and Banking\n" \
-          "  3. Confirm the App Store Connect API key has role App Manager or Admin.\n" \
-          "Original error: #{msg}"
-        )
-      end
-    end
+    # NOTE ON APP-RECORD CREATION
+    # There is deliberately no `produce` / `create_app_online` step here: that
+    # action only supports Apple-ID (username + 2FA) auth, and the App Store
+    # Connect API itself has NO endpoint to create an app record. So the record
+    # must already exist in App Store Connect. Signing below does NOT need it
+    # (it only needs the App ID, which -allowProvisioningUpdates registers), so
+    # we build first (registering the bundle id + proving signing) and let the
+    # upload step be the point of truth — with a precise account-holder message
+    # if the record is missing.
 
     # --- Build number: unique + increasing, from the CI run number ------------
     build_number = ENV["BUILD_NUMBER"] || "1"
@@ -81,12 +54,39 @@ platform :ios do
     )
 
     # --- Upload to TestFlight; don't block CI on Apple's processing -----------
-    upload_to_testflight(
-      api_key: api_key,
-      app_identifier: BUNDLE_ID,
-      skip_waiting_for_build_processing: true,
-      distribute_external: false,
-      notify_external_testers: false
-    )
+    begin
+      upload_to_testflight(
+        api_key: api_key,
+        app_identifier: BUNDLE_ID,
+        skip_waiting_for_build_processing: true,
+        distribute_external: false,
+        notify_external_testers: false
+      )
+    rescue => ex
+      msg = ex.message.to_s
+      if msg =~ /could ?n.?t find app|find app with bundle|no suitable application|application records were found|no app with/i
+        UI.user_error!(
+          "The signed build was produced successfully, but there is no App Store\n" \
+          "Connect app record for #{BUNDLE_ID}, so nothing could be uploaded to\n" \
+          "TestFlight. The App Store Connect API key CANNOT create app records\n" \
+          "(Apple exposes no API for it), and `produce` needs interactive Apple-ID\n" \
+          "+ 2FA sign-in — neither is possible from headless CI.\n" \
+          "\n" \
+          "ONE-TIME ACCOUNT-HOLDER ACTION (in a browser, ~1 minute):\n" \
+          "  1. https://appstoreconnect.apple.com  ->  My Apps  ->  (+)  ->  New App\n" \
+          "  2. Platform: iOS;  Name: your choice;  Primary language: English;\n" \
+          "     Bundle ID: #{BUNDLE_ID}  (this run just registered it, so it now\n" \
+          "     appears in the dropdown);  SKU: #{BUNDLE_ID}\n" \
+          "  3. If prompted, accept pending agreements at\n" \
+          "     https://developer.apple.com/account (Membership/Agreements) and the\n" \
+          "     Free Applications agreement in App Store Connect (Business).\n" \
+          "Then re-run this workflow — the next build will upload to TestFlight.\n" \
+          "\n" \
+          "Original uploader error: #{msg}"
+        )
+      else
+        raise ex
+      end
+    end
   end
 end
