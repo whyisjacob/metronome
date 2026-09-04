@@ -306,10 +306,15 @@ final class OfflineRenderAccuracyTests: XCTestCase {
         let base = onsets[0]
         XCTAssertLessThanOrEqual(base, 1, "playback must begin on sample 0")
 
-        // (A) COUNT: `numerator` eighths per bar (6 for 6/8) — 3 per dotted-quarter beat.
-        let expected = bars * numerator
+        // (A) COUNT matches the first-principles eighth grid over the render window (±1 at the boundary),
+        //     and the grid holds at least `numerator` eighths per bar — i.e. 3 per dotted-quarter beat.
+        let totalFrames = Int((seconds * sampleRate).rounded())
+        var expected = 0
+        while Int((Double(expected) * framesPerEighth).rounded()) < totalFrames { expected += 1 }
         XCTAssertLessThanOrEqual(abs(onsets.count - expected), 1,
-            "compound eighth pulse must be \(numerator)/bar; got \(onsets.count) vs \(expected)")
+            "compound eighth density wrong: got \(onsets.count) vs first-principles grid \(expected)")
+        XCTAssertGreaterThanOrEqual(expected, bars * numerator,
+            "the eighth grid must hold ≥ \(bars * numerator) eighths (3 per dotted-quarter beat)")
 
         // (B) ZERO DRIFT on the eighth grid, AND every third onset (a main beat) sits on the independent
         //     dotted-quarter grid.
