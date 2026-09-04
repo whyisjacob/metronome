@@ -88,6 +88,25 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.metronome.mobile.tests
         GENERATE_INFOPLIST_FILE: "YES"
 
+  # XCUITest bundle that launches the app on a simulator, walks the real screens, and captures a
+  # screenshot of each as a kept-forever XCTAttachment. Deliberately kept OUT of the `Metronome`
+  # scheme's test action (it lives in its own `MetronomeUITests` scheme below) so the existing
+  # headless unit-test CI (.github/workflows/ios.yml) keeps running only the 44 accuracy tests.
+  MetronomeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UITests/MetronomeUITests
+    dependencies:
+      - target: Metronome
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.metronome.mobile.uitests
+        GENERATE_INFOPLIST_FILE: "YES"
+        # The application this UI-test bundle launches and drives via XCUIApplication().
+        TEST_TARGET_NAME: Metronome
+
 schemes:
   Metronome:
     build:
@@ -100,3 +119,15 @@ schemes:
       gatherCoverageData: true
       targets:
         - MetronomeTests
+
+  # Separate scheme for the screenshot UI tests, run by .github/workflows/screenshots.yml.
+  # Isolated from the `Metronome` scheme so unit-test CI is unaffected.
+  MetronomeUITests:
+    build:
+      targets:
+        Metronome: all
+        MetronomeUITests: all
+    test:
+      config: Debug
+      targets:
+        - MetronomeUITests

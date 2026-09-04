@@ -14,5 +14,9 @@ xcuserdata/
 .build/
 .swiftpm/
 
+# CI screenshot capture (produced by .github/workflows/screenshots.yml on the runner)
+*.xcresult
+/screenshots/
+
 # macOS
 .DS_Store

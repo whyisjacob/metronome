@@ -1,0 +1,130 @@
+name: UI screenshots
+
+# Boots an iOS Simulator in CI, runs the XCUITest that walks the real SwiftUI screens, extracts the
+# screenshot attachments from the .xcresult, and uploads them as a downloadable `ui-screenshots`
+# artifact — so the Windows-only owner can SEE the rendered app without a Mac.
+#
+# This is a SEPARATE workflow/scheme from ios.yml on purpose: the unit-test CI keeps running only the
+# 44 headless accuracy tests (scheme `Metronome`); this runs only the UI tests (scheme
+# `MetronomeUITests`).
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui-screenshots:
+    name: Capture UI screenshots (iOS Simulator)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        run: sudo xcode-select -switch /Applications/Xcode.app
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen + xcparse
+        run: |
+          brew install xcodegen
+          # xcparse extracts XCTAttachment images (our screenshots) out of the .xcresult as PNGs.
+          brew install chargepoint/xcparse/xcparse
+          xcparse version || true
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # Pick a real, available iPhone simulator on the runner. Prefer an iOS 17.x runtime (the app's
+      # deployment target); fall back to the newest available iPhone runtime so the job never fails
+      # merely because the runner image dropped the iOS 17 runtime.
+      - name: Resolve an iOS simulator (prefer iOS 17)
+        id: sim
+        run: |
+          # print order is "udid runtime name" so NAME (which may contain spaces) is the line
+          # remainder; UDID and RUNTIME never contain spaces.
+          read -r UDID RUNTIME NAME < <(xcrun simctl list devices available --json | python3 -c "
+          import json,sys,re
+          d=json.load(sys.stdin)['devices']
+          cands=[]
+          for runtime,devs in d.items():
+              m=re.search(r'iOS-(\d+)-(\d+)', runtime)
+              if not m: continue
+              ver=(int(m.group(1)), int(m.group(2)))
+              for dev in devs:
+                  if dev.get('isAvailable') and 'iPhone' in dev.get('name',''):
+                      cands.append((ver, dev['udid'], dev['name'], runtime))
+          if not cands:
+              print(''); sys.exit(0)
+          seventeen=[c for c in cands if c[0][0]==17]
+          pool=seventeen if seventeen else cands
+          pool.sort(key=lambda c: c[0], reverse=True)
+          _,udid,name,runtime=pool[0]
+          print(udid, runtime, name)
+          ")
+          if [ -z "$UDID" ]; then
+            echo "::error::No available iPhone simulator found on the runner"; exit 1
+          fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: $NAME  ($RUNTIME)  [$UDID]"
+
+      - name: Boot simulator
+        run: |
+          xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b || true
+          # Clean, deterministic status bar for nicer screenshots (best-effort).
+          xcrun simctl status_bar "${{ steps.sim.outputs.udid }}" override \
+            --time "9:41" --batteryState charged --batteryLevel 100 \
+            --cellularBars 4 --wifiBars 3 || true
+
+      - name: Run UI tests (capture screenshots)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme MetronomeUITests \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO | tee xcodebuild-ui.log
+
+      - name: Extract screenshots from the .xcresult
+        if: always()
+        run: |
+          mkdir -p screenshots
+          # Primary path: xcparse pulls every image attachment (our .keepAlways screenshots) as PNGs.
+          xcparse screenshots --test TestResults.xcresult screenshots/ || true
+          echo "---- extracted files ----"
+          find screenshots -type f | sort || true
+          PNGS=$(find screenshots -type f -name '*.png' | wc -l | tr -d ' ')
+          echo "PNG count: $PNGS"
+          echo "png_count=$PNGS" >> "$GITHUB_OUTPUT"
+        id: extract
+
+      - name: Upload screenshots artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: screenshots/
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Raw result bundle + build log, kept short-term as a debugging aid if extraction ever yields
+      # nothing.
+      - name: Upload xcresult bundle (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult-bundle
+          path: |
+            TestResults.xcresult
+            xcodebuild-ui.log
+          if-no-files-found: ignore
+          retention-days: 7

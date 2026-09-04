@@ -28,6 +28,9 @@ struct SongBuilderView: View {
                             SongSectionRow(section: section)
                         }
                         .buttonStyle(.plain)
+                        // Stable handle for the screenshot UI test (the auto-derived label is the
+                        // concatenation of the row's name + summary line, which is brittle to match).
+                        .accessibilityIdentifier("song-section-row")
                     }
                     .onDelete { song.sections.remove(atOffsets: $0) }
                     .onMove { song.sections.move(fromOffsets: $0, toOffset: $1) }
