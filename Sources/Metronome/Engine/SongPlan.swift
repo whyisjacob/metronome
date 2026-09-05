@@ -191,6 +191,8 @@ final class SongPlan {
 
     /// Whether section `s` counts out loud (its resolved Voice setting). `false` when the plan has no voice.
     @inline(__always) func voiceEnabled(section s: Int) -> Bool { voice?.voiceEnabled(section: s) ?? false }
+    /// Whether section `s` speaks its subdivision syllables (its resolved setting; `true` without voice).
+    @inline(__always) func speakSubdivisions(section s: Int) -> Bool { voice?.speakSubdivisions(section: s) ?? true }
     /// Whether the click at flat index `i` is in a section that counts out loud.
     @inline(__always) func voiceEnabled(at i: Int) -> Bool { voiceEnabled(section: sectionIndices[i]) }
     /// The Voice token to utter on click `i` (`.none` when the plan has no voice → the engine clicks).
