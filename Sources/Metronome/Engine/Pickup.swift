@@ -1,82 +1,69 @@
 import Foundation
 
-/// A **pickup (anacrusis) / count-in**: `beats` incomplete-bar beats sounded BEFORE the first real
-/// downbeat, as a one-time lead-in (optionally repeated before every bar).
+/// A **pickup (anacrusis) / count-in**: `ticks` incomplete-bar clicks sounded BEFORE the first real
+/// downbeat, as a one-time lead-in.
 ///
-/// ## The counting is the crux
-/// A pickup is the *tail* of a bar, not "1". For a bar of `N` beats and a `k`-beat pickup, the pickup
-/// beats count **N−k+1 … N**, and the first real beat after them is the STRONG downbeat "1":
+/// ## Design — it's just the bar's own tail, started early
+/// A pickup is **not** a separate counting/accent path. It is simply the bar's own tick stream started
+/// partway through: play the last `ticks` ticks of a bar (bar-relative ticks `ticksPerBar − ticks … ticksPerBar − 1`),
+/// then hit tick 0 — the STRONG downbeat "1" — and loop normally forever after. Concretely, playback tick
+/// `t` maps to the ongoing bar-stream's **extended tick** `e = t + (ticksPerBar − ticks)`, and every
+/// per-tick decision (`voiceToken`, `accentLevel`, `beatIndex`, swing via `frame`) is taken on `e` by the
+/// **already-proven** machinery. So the count numbers, the "e/&/a/trip/let" subdivision syllables, the
+/// internal group-head accents, and the swing positions all fall out for free — nothing is re-derived.
 ///
-///   * 4/4, k = 1 → "4";  k = 2 → "3, 4";  k = 3 → "2, 3, 4"
-///   * 3/4, k = 1 → "3";  k = 2 → "2, 3"
-///   * 2/4 / 2/2, k = 1 → "2"
-///   * Compound (in the app's dotted-quarter beat unit): 6/8 counts in 2, so k = 1 → "2"; 12/8 counts in
-///     4, so k = 1 → "4", k = 2 → "3, 4".
+/// ## Why ticks, not beats
+/// Denominating in ticks makes sub-beat pickups free — the single most common real-world case. A 1-tick
+/// pickup on an eighth grid is the classic **"& of 4"** in 4/4; on a sixteenth grid a 2-tick pickup is
+/// "and, a"; on a triplet grid a 1-tick pickup is "let". Odd meters and compound meters (where a "beat" is
+/// a 3-tick dotted quarter) also work with no special-casing.
 ///
-/// This is expressed by a single re-labeling of the global beat index `g` (0-based from playback start):
-/// `beatInBar(g) = floorMod(g − k, N)`. For `g < k` (a pickup beat) that is `N − k + g` — the tail count;
-/// for `g ≥ k` it is the normal loop with the downbeat at `g = k`. The onset *frames* are unchanged — a
-/// pickup beat is just tick `g·ticksPerBeat` on the same sample-accurate grid — so `Pickup` is a pure
-/// labeling overlay on `RenderPlan` (exactly like `GapTrainer`); it never touches the timing math.
+/// ## Accents & sound
+/// The pickup ticks are the bar's TAIL, which never includes tick 0, so they are inherently non-`strong`
+/// (they inherit the bar's real tail accents — e.g. a 7/8 2+2+3 group head stays `medium`), and the first
+/// real downbeat after the pickup is `strong`. The "different tune" is a distinct **timbre/pitch at the
+/// tick's natural (weak/normal/medium) gain** — never louder — applied by the engine to pickup ticks.
 ///
-/// The default is a **one-time** lead-in: the pickup occupies only global beats `0 … k−1`, so after the
-/// first downbeat the metronome loops the full bar normally. `repeatsEachCycle` re-inserts the pickup
-/// before every downbeat (period `k + N` beats) for practice.
+/// ## Looping — once only
+/// In notation an anacrusis borrows its length from the incomplete FINAL bar of the phrase; a metronome
+/// has no final bar to borrow from, so replaying the pickup each cycle would inject phantom beats and
+/// corrupt the bar length — the one thing a metronome must never do. So the pickup plays exactly ONCE
+/// (only playback ticks `0 … ticks−1`); after the first downbeat the metronome loops the full bar.
 struct Pickup: Equatable {
-    /// Number of pickup beats (0 = off). The UI clamps this to `1 … beatsPerBar−1`; `effectiveBeats(_:)`
-    /// re-clamps defensively so a stale value can never exceed the meter.
-    var beats: Int
-    /// When true, the pickup is re-inserted before every bar (each cycle), not just once. Default `false`
-    /// — a pickup is a one-time lead-in.
-    var repeatsEachCycle: Bool
+    /// Pickup length in CURRENT-GRID TICKS (0 = off). The UI clamps this to `1 … ticksPerBar−1`;
+    /// `effectiveTicks(ticksPerBar:)` re-clamps defensively so a stale value can never reach a full bar.
+    var ticks: Int
 
-    init(beats: Int = 0, repeatsEachCycle: Bool = false) {
-        self.beats = max(0, beats)
-        self.repeatsEachCycle = repeatsEachCycle
-    }
+    init(ticks: Int = 0) { self.ticks = max(0, ticks) }
 
-    /// The "off" pickup — used as the default everywhere, so a `RenderPlan` built without one behaves
-    /// byte-for-byte as before.
+    /// The "off" pickup — the default everywhere, so a `RenderPlan` built without one behaves byte-for-byte
+    /// as before.
     static let none = Pickup()
 
-    var isEnabled: Bool { beats > 0 }
+    var isEnabled: Bool { ticks > 0 }
 
-    /// The pickup length actually usable in a meter of `N` beats: at most `N − 1` (a pickup is an
-    /// *incomplete* bar, so it can never be a whole bar or more), and 0 for a 1-beat meter.
-    func effectiveBeats(beatsPerBar N: Int) -> Int {
-        guard N > 1 else { return 0 }
-        return min(max(beats, 0), N - 1)
+    /// The pickup length actually usable in a bar of `B` ticks: at most `B − 1` (a pickup is an *incomplete*
+    /// bar — one full bar or more is a count-in, not an anacrusis), and 0 for a 1-tick bar.
+    func effectiveTicks(ticksPerBar B: Int) -> Int {
+        guard B > 1 else { return 0 }
+        return min(max(ticks, 0), B - 1)
     }
 
-    /// Non-negative modulo (Swift's `%` can be negative for a negative dividend, and pickup labeling
-    /// evaluates `g − k` which is negative during the lead-in).
-    private static func floorMod(_ a: Int, _ n: Int) -> Int {
-        guard n > 0 else { return 0 }
-        let m = a % n
-        return m >= 0 ? m : m + n
+    /// The bar-relative tick where playback begins (the extended tick of playback tick 0) — i.e.
+    /// `ticksPerBar − effectiveTicks`. This is the amount every playback tick is shifted by.
+    func startTick(ticksPerBar B: Int) -> Int { B - effectiveTicks(ticksPerBar: B) }
+
+    /// The ongoing bar-stream ("extended") tick for playback tick `t`: `t + (B − ticks)` when enabled, or
+    /// `t` unchanged when off. Feeding this to the normal per-tick functions yields the pickup for free.
+    func extendedTick(_ t: Int, ticksPerBar B: Int) -> Int {
+        let p = effectiveTicks(ticksPerBar: B)
+        guard p > 0 else { return t }
+        return t + (B - p)
     }
 
-    /// Whether global beat `g` (0-based from playback start) is a pickup (lead-in) beat — one of the beats
-    /// sounded before the downbeat. Once mode: only `g < k`. Repeat mode: the first `k` beats of every
-    /// `k + N` cycle.
-    func isPickupBeat(globalBeat g: Int, beatsPerBar N: Int) -> Bool {
-        let k = effectiveBeats(beatsPerBar: N)
-        guard k > 0, g >= 0 else { return false }
-        if repeatsEachCycle { return Self.floorMod(g, k + N) < k }
-        return g < k
-    }
-
-    /// The beat-within-bar (0-based) global beat `g` should count as, accounting for the pickup shift.
-    /// Pickup beats map to the TAIL of the bar (`N−k … N−1`); the first real downbeat maps to 0.
-    /// With no pickup this is the plain `g mod N`.
-    func beatInBar(globalBeat g: Int, beatsPerBar N: Int) -> Int {
-        guard N > 0 else { return 0 }
-        let k = effectiveBeats(beatsPerBar: N)
-        guard k > 0 else { return Self.floorMod(g, N) }
-        if repeatsEachCycle {
-            let p = Self.floorMod(g, k + N)
-            return p < k ? (N - k + p) : (p - k)
-        }
-        return Self.floorMod(g - k, N)
+    /// Whether playback tick `t` is a pickup (lead-in) tick — the first `effectiveTicks` ticks, once.
+    func isPickupTick(_ t: Int, ticksPerBar B: Int) -> Bool {
+        let p = effectiveTicks(ticksPerBar: B)
+        return p > 0 && t >= 0 && t < p
     }
 }

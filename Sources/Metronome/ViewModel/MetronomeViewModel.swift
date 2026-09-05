@@ -67,14 +67,16 @@ final class MetronomeViewModel: ObservableObject {
 
     /// Main beats (pulses) per bar of the current meter — the length of the accent pattern.
     var beatsPerBar: Int { config.beatsPerBar }
-    /// The largest count-in the current meter allows: a pickup is an *incomplete* bar, so at most
-    /// `beatsPerBar − 1` beats (0 for a one-beat meter, which can't have a pickup).
-    var maxPickupBeats: Int { max(0, config.beatsPerBar - 1) }
-    /// The count-in length, clamped to what the current meter allows (so the UI never shows a stale value
-    /// larger than the meter after a meter change).
-    var pickupBeats: Int { min(pickup.beats, maxPickupBeats) }
-    /// Whether the count-in repeats before every bar (default false — a one-time lead-in).
-    var pickupRepeats: Bool { pickup.repeatsEachCycle }
+    /// Clicks per beat at the current subdivision (compound-aware).
+    var ticksPerBeat: Int { config.ticksPerBeat }
+    /// Total clicks per bar — the unit the count-in is denominated in.
+    var ticksPerBar: Int { config.ticksPerBar }
+    /// The largest count-in the current grid allows: a pickup is an *incomplete* bar, so at most
+    /// `ticksPerBar − 1` ticks (0 for a one-tick bar, which can't have a pickup).
+    var maxPickupTicks: Int { max(0, config.ticksPerBar - 1) }
+    /// The count-in length in ticks, clamped to what the current grid allows (so the UI never shows a stale
+    /// value larger than the bar after a meter/subdivision change).
+    var pickupTicks: Int { min(pickup.ticks, maxPickupTicks) }
 
     init(config: MetronomeConfiguration = MetronomeConfiguration(),
          recents: RecentsStore? = nil,
@@ -143,7 +145,10 @@ final class MetronomeViewModel: ObservableObject {
 
     func nudgeBPM(_ delta: Double) { setBPM((config.bpm + delta).rounded()) }
 
-    func setSubdivision(_ subdivision: Subdivision) { updateConfig { $0.subdivision = subdivision } }
+    func setSubdivision(_ subdivision: Subdivision) {
+        updateConfig { $0.subdivision = subdivision }
+        clampPickupToGrid()   // the grid got finer/coarser → ticksPerBar changed
+    }
 
     /// Sets the swing / shuffle amount (0…1). Clamped by the config initializer. Delays the off-beat
     /// eighth/sixteenth pair members toward the triplet position; the main beats never move.
@@ -160,6 +165,7 @@ final class MetronomeViewModel: ObservableObject {
                 $0.subdivision = .eighth
             }
         }
+        clampPickupToGrid()   // self-activation may have changed the subdivision (→ ticksPerBar)
     }
 
     /// Selects an idiomatic rhythm cell (sixteenth grid only; `.straight` = off).
@@ -173,6 +179,7 @@ final class MetronomeViewModel: ObservableObject {
                 $0.subdivision = .sixteenth
             }
         }
+        clampPickupToGrid()   // self-activation may have changed the subdivision (→ ticksPerBar)
     }
 
     func setSound(_ sound: MetronomeSound) {
@@ -198,27 +205,71 @@ final class MetronomeViewModel: ObservableObject {
 
     // MARK: - Pickup / count-in
 
-    /// Sets the count-in length (number of pickup beats), clamped to `0…beatsPerBar−1` for the current
-    /// meter, and applies it to the engine so the next Start replays the lead-in. See `Pickup`.
-    func setPickupBeats(_ beats: Int) {
-        let clamped = min(max(0, beats), maxPickupBeats)
-        pickup = Pickup(beats: clamped, repeatsEachCycle: pickup.repeatsEachCycle)
+    /// Sets the count-in length in TICKS, clamped to `0…ticksPerBar−1` for the current grid, and applies it
+    /// to the engine so the next Start replays the lead-in. Tick-denominated so sub-beat pickups (e.g. the
+    /// eighth-grid "& of 4") are expressible. See `Pickup`.
+    func setPickupTicks(_ ticks: Int) {
+        let clamped = min(max(0, ticks), maxPickupTicks)
+        pickup = Pickup(ticks: clamped)
         engine.setPickup(pickup)
     }
 
-    /// Toggles whether the count-in repeats before every bar (default off — a one-time lead-in).
-    func setPickupRepeats(_ on: Bool) {
-        pickup = Pickup(beats: pickup.beats, repeatsEachCycle: on)
+    /// Re-clamps the count-in to the current grid after a meter OR subdivision change (both change
+    /// `ticksPerBar`), and republishes it. A no-op when it already fits.
+    private func clampPickupToGrid() {
+        let clamped = min(pickup.ticks, maxPickupTicks)
+        guard clamped != pickup.ticks else { return }
+        pickup = Pickup(ticks: clamped)
         engine.setPickup(pickup)
     }
 
-    /// Re-clamps the count-in to the current meter after a meter change (e.g. 4/4 pickup of 3 → 2/4 caps
-    /// it at 1), and republishes it. A no-op when it already fits.
-    private func clampPickupToMeter() {
-        let clamped = min(pickup.beats, maxPickupBeats)
-        guard clamped != pickup.beats else { return }
-        pickup = Pickup(beats: clamped, repeatsEachCycle: pickup.repeatsEachCycle)
-        engine.setPickup(pickup)
+    /// A friendly note-value label for a count-in of `ticks` ticks at the current grid — e.g. a 1-tick
+    /// pickup reads "½ beat" on an eighth grid, "1 beat" on a quarter grid; 3 ticks reads "1 beat" in a
+    /// compound (dotted-quarter) meter. Off for 0.
+    func pickupNoteValueLabel(ticks: Int) -> String {
+        guard ticks > 0 else { return "Off" }
+        let tpb = max(ticksPerBeat, 1)
+        let whole = ticks / tpb
+        let rem = ticks % tpb
+        if rem == 0 { return whole == 1 ? "1 beat" : "\(whole) beats" }
+        let frac = Self.fractionString(rem, tpb)
+        if whole == 0 { return "\(frac) beat" }
+        return "\(whole)\(frac) beats"
+    }
+
+    /// The exact count the current pickup will speak/show, as display tokens (numbers and the "& e a trip
+    /// let" syllables), derived from the SAME `RenderPlan.voiceToken` the engine uses — so the UI preview
+    /// can never disagree with what's played. Empty when the count-in is off.
+    var pickupPreviewTokens: [String] {
+        let p = pickupTicks
+        guard p > 0 else { return [] }
+        let plan = RenderPlan(config: config, sampleRate: 48_000, pickup: pickup)
+        return (0..<p).map { Self.tokenLabel(plan.voiceToken(forTick: $0)) }
+    }
+
+    private static func tokenLabel(_ token: VoiceToken) -> String {
+        switch token {
+        case .number(let i): return "\(i + 1)"
+        case .syllable(let s):
+            switch s {
+            case .and:    return "&"
+            case .e:      return "e"
+            case .a:      return "a"
+            case .trip:   return "trip"
+            case .letSub: return "let"
+            }
+        case .none: return "·"
+        }
+    }
+
+    private static func fractionString(_ numerator: Int, _ denominator: Int) -> String {
+        func gcd(_ a: Int, _ b: Int) -> Int { b == 0 ? a : gcd(b, a % b) }
+        let g = max(gcd(numerator, denominator), 1)
+        let a = numerator / g, b = denominator / g
+        let glyphs = ["1/2": "½", "1/3": "⅓", "2/3": "⅔", "1/4": "¼", "3/4": "¾",
+                      "1/5": "⅕", "2/5": "⅖", "3/5": "⅗", "4/5": "⅘",
+                      "1/6": "⅙", "5/6": "⅚", "1/8": "⅛", "3/8": "⅜", "5/8": "⅝", "7/8": "⅞"]
+        return glyphs["\(a)/\(b)"] ?? "\(a)/\(b)"
     }
 
     /// Loads a saved recent: applies its full configuration (restoring its BPM) and re-registers it so
@@ -234,7 +285,7 @@ final class MetronomeViewModel: ObservableObject {
             let ts = TimeSignature(numerator: numerator, denominator: config.timeSignature.denominator)
             Self.applyMeter(ts, to: &config)
         }
-        clampPickupToMeter()   // a shorter bar may no longer fit the count-in
+        clampPickupToGrid()   // a shorter bar may no longer fit the count-in
     }
 
     func setDenominator(_ denominator: Int) {
@@ -242,7 +293,7 @@ final class MetronomeViewModel: ObservableObject {
             let ts = TimeSignature(numerator: config.timeSignature.numerator, denominator: denominator)
             Self.applyMeter(ts, to: &config)
         }
-        clampPickupToMeter()   // simple↔compound changes beatsPerBar (e.g. 6/8 → 2 beats)
+        clampPickupToGrid()   // simple↔compound changes ticksPerBar (e.g. 6/8 → 2 beats)
     }
 
     /// Applies a new meter: adopts its sensible default accents (compound-aware) and, on a simple↔compound

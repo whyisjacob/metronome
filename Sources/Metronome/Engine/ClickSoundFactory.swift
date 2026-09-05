@@ -85,23 +85,28 @@ enum ClickSoundFactory {
         if let s = base[.strong], let n = base[.normal] {
             withMedium[.medium] = mediumSpec(strong: s, normal: n)
         }
-        if let n = base[.normal] {
-            withMedium[.pickup] = pickupSpec(normal: n)
-        }
         return withMedium
     }
 
-    /// The pickup / count-in voice: the sound's NORMAL click dropped a perfect fifth in pitch, at a
-    /// slightly reduced (still clearly unaccented) gain. The lower pitch makes it audibly DISTINCT from
-    /// both the strong downbeat and the normal beat ("a slightly different tune"), so a lead-in reads as a
-    /// lead-in and is never mistaken for the downbeat. Derived per-sound so every timbre gains a matching
-    /// pickup with no per-sound tuning, and without touching the strong/normal/weak specs the accuracy
-    /// tests render against.
-    static func pickupSpec(normal n: Spec) -> Spec {
-        var s = n
-        s.frequency = n.frequency * (2.0 / 3.0)   // a perfect fifth below the normal click
-        s.gain = n.gain * 0.9
+    /// The **pickup / count-in** click voice for one accent level: the sound's own click for that level,
+    /// dropped a perfect fifth in pitch. The lower pitch makes it audibly DISTINCT from both the strong
+    /// downbeat and the normal beat ("a slightly different tune") — a lead-in that reads as a lead-in — at
+    /// the level's OWN gain (never louder), so a pickup that spans a group head keeps its `medium` emphasis.
+    static func pickupSpec(_ spec: Spec) -> Spec {
+        var s = spec
+        s.frequency = spec.frequency * (2.0 / 3.0)   // a perfect fifth below the normal pitch
         return s
+    }
+
+    /// The full pickup click table for `sound` — one buffer per `AccentLevel`, the same accent-indexed
+    /// structure as `makeClickTable` but pitch-shifted (see `pickupSpec`). Because the pickup ticks reuse
+    /// the bar's real tail accents, indexing this by the tick's natural level preserves the pickup's
+    /// internal emphasis (e.g. a 7/8 group head stays `medium`) while giving the whole lead-in a distinct
+    /// timbre. The `.muted` slot is empty (as in `makeClickTable`) and `.strong` is never triggered for a
+    /// pickup (a tail tick is never the downbeat).
+    static func makePickupTable(sampleRate: Double, sound: MetronomeSound = .classic) -> [[Float]] {
+        let shifted = specs(for: sound).mapValues(pickupSpec)
+        return makeClickTable(sampleRate: sampleRate, specs: shifted)
     }
 
     /// The secondary-accent voice: field-wise mid-point between the strong and normal specs. Its timbre

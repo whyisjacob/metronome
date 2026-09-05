@@ -16,9 +16,6 @@ enum Theme {
     static let accentMedium   = Color(red: 1.00, green: 0.58, blue: 0.19)
     /// Unaccented beat.
     static let accentNormal   = Color(red: 1.00, green: 0.76, blue: 0.22)
-    /// Pickup / count-in lead-in beat — a cool colour, deliberately distinct from the warm accent hues so
-    /// a count-in reads as a lead-in, not a downbeat.
-    static let accentPickup   = Color(red: 0.35, green: 0.78, blue: 0.92)
     /// Idle (not currently sounding) beat dot.
     static let beatIdle       = Color(white: 0.24)
     /// A muted beat marker (present, but silent).

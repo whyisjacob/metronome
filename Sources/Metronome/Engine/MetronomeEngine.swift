@@ -58,6 +58,7 @@ final class MetronomeEngine {
         /// `[[Float]]` (indexed by accent level, or by beat for `voiceTable`) — COW value types, so the
         /// audio thread snapshots them with a cheap retain, never an allocation.
         var clickTable: [[Float]] = []      // the selected click timbre (single-tempo mode)
+        var pickupTable: [[Float]] = []     // the selected timbre, pitch-shifted — the distinct pickup tone
         var voiceTable: [[Float]] = []      // spoken numbers, indexed by beat (0 == "one"); may be empty
         var voiceSyllableTable: [[Float]] = [] // spoken subdivision syllables, indexed by VoiceSyllable.rawValue
         var classicTable: [[Float]] = []    // always the classic click — song mode & fallback
@@ -135,6 +136,7 @@ final class MetronomeEngine {
     // Audio-thread-only working snapshots of the published sound buffers, refreshed at the top of every
     // render block (a cheap COW retain). Only `render`/`mix` touch these, so there is no race.
     private var atSelectedTable: [[Float]] = []
+    private var atPickupTable: [[Float]] = []
     private var atVoiceTable: [[Float]] = []
     private var atVoiceSyllableTable: [[Float]] = []
     private var atClassicTable: [[Float]] = []
@@ -239,7 +241,8 @@ final class MetronomeEngine {
         let clickSound: MetronomeSound = sound.isVoice ? .classic : sound
         if installedClickSound != clickSound {
             let table = ClickSoundFactory.makeClickTable(sampleRate: configuredSampleRate, sound: clickSound)
-            control.withLock { $0.clickTable = table }
+            let pickupTable = ClickSoundFactory.makePickupTable(sampleRate: configuredSampleRate, sound: clickSound)
+            control.withLock { $0.clickTable = table; $0.pickupTable = pickupTable }
             installedClickSound = clickSound
         }
         control.withLock { $0.voiceMode = sound.isVoice }
@@ -421,10 +424,12 @@ final class MetronomeEngine {
         // timbre or voice. A fresh engine — including the offline accuracy tests — therefore renders the
         // classic click with no dependence on the sound-selection system.
         let classic = ClickSoundFactory.makeClickTable(sampleRate: sampleRate, sound: .classic)
+        let classicPickup = ClickSoundFactory.makePickupTable(sampleRate: sampleRate, sound: .classic)
         installedClickSound = nil
         control.withLock {
             $0.classicTable = classic
             $0.clickTable = classic
+            $0.pickupTable = classicPickup
             $0.voiceTable = []
             $0.voiceSyllableTable = []
             $0.voiceMode = false
@@ -576,6 +581,7 @@ final class MetronomeEngine {
         var plan: RenderPlan?
         var songPlan: SongPlan?
         var selectedTable: [[Float]] = []
+        var pickupTable: [[Float]] = []
         var voiceTable: [[Float]] = []
         var voiceSyllableTable: [[Float]] = []
         var classicTable: [[Float]] = []
@@ -587,6 +593,7 @@ final class MetronomeEngine {
             plan = c.plan
             songPlan = c.songPlan
             selectedTable = c.clickTable
+            pickupTable = c.pickupTable
             voiceTable = c.voiceTable
             voiceSyllableTable = c.voiceSyllableTable
             classicTable = c.classicTable
@@ -596,6 +603,7 @@ final class MetronomeEngine {
             if c.resetRequested { c.resetRequested = false; didReset = true }
         }
         atSelectedTable = selectedTable
+        atPickupTable = pickupTable
         atVoiceTable = voiceTable
         atVoiceSyllableTable = voiceSyllableTable
         atClassicTable = classicTable
@@ -712,13 +720,18 @@ final class MetronomeEngine {
                             // user's "beats only" preference and unmapped ticks (tuplets/32nds) click too.
                             var token = plan.voiceToken(forTick: tick)
                             if case .syllable = token,
-                               !atSpeakSubdivisions || !plan.speaksSubdivision(atPosInBeat: tick % plan.ticksPerBeat) {
+                               !atSpeakSubdivisions || !plan.speaksSubdivision(forTick: tick) {
                                 token = .none
                             }
                             scheduleVoiceToken(token, level: level, at: offset,
                                                into: ablPtr, frameCount: frames)
                         } else {
-                            triggerVoice(table: 0, bufferIndex: level.rawValue, at: offset,
+                            // Click mode: a pickup / count-in tick uses the distinct pickup timbre (table 4)
+                            // at its natural accent level — so the lead-in is a "different tune" without ever
+                            // being louder than the downbeat; every other tick uses the selected timbre
+                            // (table 0). Same onset frame, so timing is byte-for-byte unchanged.
+                            let clickTableId = plan.isPickup(forTick: tick) ? 4 : 0
+                            triggerVoice(table: clickTableId, bufferIndex: level.rawValue, at: offset,
                                          into: ablPtr, frameCount: frames, cutVoices: false)
                         }
                     }
@@ -811,12 +824,14 @@ final class MetronomeEngine {
     }
 
     /// The buffer a voice reads from, by table id: 0 = selected click timbre, 1 = spoken number,
-    /// 2 = classic click (song mode / fallback), 3 = spoken subdivision syllable.
+    /// 2 = classic click (song mode / fallback), 3 = spoken subdivision syllable, 4 = pickup click (the
+    /// selected timbre pitch-shifted).
     private func voiceBuffer(table: Int, index: Int) -> [Float]? {
         switch table {
         case 1:  return atVoiceTable.indices.contains(index) ? atVoiceTable[index] : nil
         case 2:  return atClassicTable.indices.contains(index) ? atClassicTable[index] : nil
         case 3:  return atVoiceSyllableTable.indices.contains(index) ? atVoiceSyllableTable[index] : nil
+        case 4:  return atPickupTable.indices.contains(index) ? atPickupTable[index] : nil
         default: return atSelectedTable.indices.contains(index) ? atSelectedTable[index] : nil
         }
     }
@@ -833,7 +848,6 @@ final class MetronomeEngine {
     /// Cheap: it advances at most a couple of ticks (onsets are far wider than an audio block at any
     /// speakable tempo). Audio-thread only; reads the same immutable plan the render loop schedules from.
     private func firstSpokenOnsetOffset(plan: RenderPlan, blockStart: Int, blockEnd: Int) -> Int {
-        let tpb = max(plan.ticksPerBeat, 1)
         var tick = atState.nextTick
         while true {
             let onset = atState.epochFrame + plan.frame(forTick: tick)
@@ -842,9 +856,11 @@ final class MetronomeEngine {
                 let level = plan.accentLevel(forTick: tick)
                 let gate = plan.trainerGate(forTick: tick)
                 if level != .muted && gate == .play {
-                    if tick % tpb == 0 {
+                    // `isBeat`/`speaksSubdivision(forTick:)` are pickup-shifted, so a pickup subdivision that
+                    // speaks (e.g. a spoken "& of 4") is correctly treated as a spoken onset.
+                    if plan.isBeat(forTick: tick) {
                         return onset - blockStart                       // a beat: speaks its number
-                    } else if atSpeakSubdivisions && plan.speaksSubdivision(atPosInBeat: tick % tpb),
+                    } else if atSpeakSubdivisions && plan.speaksSubdivision(forTick: tick),
                               case .syllable = plan.voiceToken(forTick: tick) {
                         return onset - blockStart                       // a spoken subdivision syllable
                     }
