@@ -108,6 +108,15 @@ final class SmartImportViewModel: ObservableObject {
     /// Whether OCR found anything at all — the review screen shows a "fill it in yourself" note if not.
     var foundSomething: Bool { result?.hasAnyDetection ?? false }
 
+    /// A plausible **runner-up** tempo the parser also ranked (e.g. a second metronome number on the page),
+    /// offered on the review screen as a one-tap alternative to the chosen value. Clamped to the engine
+    /// range, and `nil` once it would just repeat the current tempo (so the chip hides after it's applied).
+    var alternativeTempo: Int? {
+        guard let alt = result?.tempoAlternativeBPM else { return nil }
+        let clamped = alt.clamped(to: tempoRange)
+        return clamped == tempoBPM ? nil : clamped
+    }
+
     /// A short, human summary of what OCR found (or didn't), for the review screen.
     var detectionSummary: String {
         guard let result else { return "" }

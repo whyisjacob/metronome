@@ -199,6 +199,17 @@ struct SmartImportView: View {
                 Stepper("Tempo", value: $vm.tempoBPM, in: vm.tempoRange)
                     .labelsHidden()
             }
+            // The ranking keeps a runner-up when the page had a second plausible tempo number; one tap
+            // swaps to it (the field above still allows any manual edit).
+            if let alt = vm.alternativeTempo {
+                Button { vm.tempoBPM = alt } label: {
+                    Label("Also read \(alt) BPM — use instead", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(PillButtonStyle())
+                .padding(.top, 4)
+            }
         }
     }
 
