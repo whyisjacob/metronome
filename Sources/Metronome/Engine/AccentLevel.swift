@@ -18,4 +18,9 @@ enum AccentLevel: Int, CaseIterable, Codable {
     /// A muted beat — the engine emits **no** click for it (its buffer slot is silent) but still
     /// advances the count and the visual pulse.
     case muted = 4
+    /// A **pickup / count-in** lead-in click — a distinct, unaccented lead-in tone (a lower pitch than
+    /// the normal beat; see `ClickSoundFactory.pickupSpec`), used only for the one-time count-in beats
+    /// before the first downbeat. Appended (index 5) so the strong/normal/weak/medium/muted indices the
+    /// accuracy tests depend on are byte-for-byte unchanged, and the pickup is never the strong accent.
+    case pickup = 5
 }

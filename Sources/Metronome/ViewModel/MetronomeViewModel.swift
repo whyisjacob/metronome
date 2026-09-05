@@ -18,6 +18,11 @@ final class MetronomeViewModel: ObservableObject {
     /// Songs, or persisted settings. Starts disabled every launch — a practice mode you opt into.
     @Published private(set) var trainer = GapTrainer()
 
+    /// The pickup / count-in overlay (a one-time lead-in before the first downbeat). Like `trainer`, it is
+    /// a playback overlay held here — not part of `MetronomeConfiguration` — so it never touches Recents,
+    /// Songs, or persistence, and it starts off every launch. Clamped to the current meter (see `Pickup`).
+    @Published private(set) var pickup = Pickup.none
+
     // Visual beat indicator, refreshed by `pollPulse()` which the view drives at display rate.
     @Published private(set) var activeBeat: Int?
     @Published private(set) var activeAccent: AccentLevel = .normal
@@ -57,6 +62,19 @@ final class MetronomeViewModel: ObservableObject {
     var cellIsActive: Bool { config.cellIsActive }
     /// Whether Voice mode speaks the in-between subdivision syllables (persisted; default on).
     var speakSubdivisions: Bool { soundSettings?.speakSubdivisions ?? true }
+    /// Voice-mode spoken volume (0…1, independent of the click volume; persisted; default 1.0).
+    var voiceVolume: Double { soundSettings?.voiceVolume ?? 1.0 }
+
+    /// Main beats (pulses) per bar of the current meter — the length of the accent pattern.
+    var beatsPerBar: Int { config.beatsPerBar }
+    /// The largest count-in the current meter allows: a pickup is an *incomplete* bar, so at most
+    /// `beatsPerBar − 1` beats (0 for a one-beat meter, which can't have a pickup).
+    var maxPickupBeats: Int { max(0, config.beatsPerBar - 1) }
+    /// The count-in length, clamped to what the current meter allows (so the UI never shows a stale value
+    /// larger than the meter after a meter change).
+    var pickupBeats: Int { min(pickup.beats, maxPickupBeats) }
+    /// Whether the count-in repeats before every bar (default false — a one-time lead-in).
+    var pickupRepeats: Bool { pickup.repeatsEachCycle }
 
     init(config: MetronomeConfiguration = MetronomeConfiguration(),
          recents: RecentsStore? = nil,
@@ -69,7 +87,10 @@ final class MetronomeViewModel: ObservableObject {
         if let soundSettings { initial.sound = soundSettings.sound }
         self.config = initial
         engine.update(initial)
-        if let soundSettings { engine.setSpeakSubdivisions(soundSettings.speakSubdivisions) }
+        if let soundSettings {
+            engine.setSpeakSubdivisions(soundSettings.speakSubdivisions)
+            engine.setVoiceVolume(soundSettings.voiceVolume)
+        }
         engine.onPlaybackStateChanged = { [weak self] playing in
             // Delivered on the main queue by the engine.
             self?.reconcilePlaybackState(playing)
@@ -167,6 +188,39 @@ final class MetronomeViewModel: ObservableObject {
         engine.setSpeakSubdivisions(on)
     }
 
+    /// Sets the voice-mode spoken volume (0…1), independent of the click volume. Persists the preference
+    /// and applies it to the engine live — it scales only the spoken numbers/syllables, never the clicks
+    /// or the sample-accurate timing.
+    func setVoiceVolume(_ volume: Double) {
+        soundSettings?.setVoiceVolume(volume)
+        engine.setVoiceVolume(volume)
+    }
+
+    // MARK: - Pickup / count-in
+
+    /// Sets the count-in length (number of pickup beats), clamped to `0…beatsPerBar−1` for the current
+    /// meter, and applies it to the engine so the next Start replays the lead-in. See `Pickup`.
+    func setPickupBeats(_ beats: Int) {
+        let clamped = min(max(0, beats), maxPickupBeats)
+        pickup = Pickup(beats: clamped, repeatsEachCycle: pickup.repeatsEachCycle)
+        engine.setPickup(pickup)
+    }
+
+    /// Toggles whether the count-in repeats before every bar (default off — a one-time lead-in).
+    func setPickupRepeats(_ on: Bool) {
+        pickup = Pickup(beats: pickup.beats, repeatsEachCycle: on)
+        engine.setPickup(pickup)
+    }
+
+    /// Re-clamps the count-in to the current meter after a meter change (e.g. 4/4 pickup of 3 → 2/4 caps
+    /// it at 1), and republishes it. A no-op when it already fits.
+    private func clampPickupToMeter() {
+        let clamped = min(pickup.beats, maxPickupBeats)
+        guard clamped != pickup.beats else { return }
+        pickup = Pickup(beats: clamped, repeatsEachCycle: pickup.repeatsEachCycle)
+        engine.setPickup(pickup)
+    }
+
     /// Loads a saved recent: applies its full configuration (restoring its BPM) and re-registers it so
     /// it surfaces to the top of Recents. Playback state is unchanged.
     func load(_ configuration: MetronomeConfiguration) {
@@ -180,6 +234,7 @@ final class MetronomeViewModel: ObservableObject {
             let ts = TimeSignature(numerator: numerator, denominator: config.timeSignature.denominator)
             Self.applyMeter(ts, to: &config)
         }
+        clampPickupToMeter()   // a shorter bar may no longer fit the count-in
     }
 
     func setDenominator(_ denominator: Int) {
@@ -187,6 +242,7 @@ final class MetronomeViewModel: ObservableObject {
             let ts = TimeSignature(numerator: config.timeSignature.numerator, denominator: denominator)
             Self.applyMeter(ts, to: &config)
         }
+        clampPickupToMeter()   // simple↔compound changes beatsPerBar (e.g. 6/8 → 2 beats)
     }
 
     /// Applies a new meter: adopts its sensible default accents (compound-aware) and, on a simple↔compound

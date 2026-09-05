@@ -121,6 +121,7 @@ struct SettingsView: View {
     @ViewBuilder private func content(for section: SettingsSection) -> some View {
         switch section {
         case .sections:    EmptyView()   // rendered as a launcher in the section loop, not here
+        case .countIn:     CountInControlView(viewModel: viewModel)
         case .voice:       voiceSection
         case .groove:      GrooveControlView(viewModel: viewModel)
         case .accents:     AccentRowView(viewModel: viewModel)
@@ -136,6 +137,7 @@ struct SettingsView: View {
     private func subtitle(for section: SettingsSection) -> String {
         switch section {
         case .sections:    return ""      // the launcher supplies its own descriptive subtitle
+        case .countIn:     return viewModel.pickupBeats == 0 ? "Off" : "\(viewModel.pickupBeats)-beat lead-in"
         case .voice:       return soundSettings.speakSubdivisions ? "Counts subdivisions aloud" : "Beat numbers only"
         case .groove:      return grooveSummary
         case .accents:     return "\(viewModel.accents.count)-beat pattern"
@@ -172,6 +174,8 @@ struct SettingsView: View {
             }
             .tint(Theme.start)
 
+            voiceVolumeRow
+
             Text(voiceExplainer)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
@@ -192,6 +196,30 @@ struct SettingsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The voice volume slider — the spoken count's loudness, independent of the click volume. Applies
+    /// live (and persists); the label shows the current percentage so the control is never a dead knob.
+    private var voiceVolumeRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Voice volume")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text("\(Int((viewModel.voiceVolume * 100).rounded()))%")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Slider(value: Binding(get: { viewModel.voiceVolume },
+                                  set: { viewModel.setVoiceVolume($0) }),
+                   in: 0...1)
+                .tint(Theme.accentNormal)
+                .accessibilityLabel("Voice volume")
+            Text("How loud the spoken count is, separate from the click volume.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
         }
     }
 

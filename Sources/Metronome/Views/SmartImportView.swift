@@ -9,6 +9,14 @@ import UIKit
 ///
 /// Scope is stated honestly in the UI: v1 reads the starting tempo + time signature only. Bar counting
 /// and mid-piece meter changes are a later stretch (see ROADMAP).
+///
+/// ## ⚠️ Not surfaced in the normal user flow (intentionally demoted)
+/// Vision does **text** OCR, but a printed time signature is a music-font *glyph*, not text, and many
+/// scores (hymns especially) print no tempo marking at all — so this quietly fails on ordinary sheet
+/// music and over-promises. The entry point was therefore removed from the main screen (see
+/// `ContentView`); this view, `SmartImport/`, and their tests are kept intact and compiling, so the
+/// feature can return behind a clearly-labelled "Experimental" affordance once it only claims what it can
+/// deliver (a tempo/meter printed as readable TEXT). It is not referenced by the shipping UI today.
 struct SmartImportView: View {
     @ObservedObject var metronome: MetronomeViewModel
     @ObservedObject var store: SongStore

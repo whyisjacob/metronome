@@ -48,4 +48,30 @@ final class SoundSettingsTests: XCTestCase {
         SoundSettingsStore(defaults: defaults).setSound(.beep)   // touch the store, but not the speak key
         XCTAssertTrue(SoundSettingsStore(defaults: defaults).speakSubdivisions)
     }
+
+    /// Voice volume defaults to full (1.0), persists across a fresh store, and clamps to 0…1.
+    func testVoiceVolumeDefaultsFullAndPersists() {
+        let defaults = makeDefaults()
+        XCTAssertEqual(SoundSettingsStore(defaults: defaults).voiceVolume, 1.0, accuracy: 1e-9)
+
+        SoundSettingsStore(defaults: defaults).setVoiceVolume(0.4)
+        XCTAssertEqual(SoundSettingsStore(defaults: defaults).voiceVolume, 0.4, accuracy: 1e-9)
+    }
+
+    /// An *absent* voice-volume key must read as 1.0 (not the 0.0 `double(forKey:)` would give), so the
+    /// voice is not silent out of the box.
+    func testAbsentVoiceVolumeDefaultsFull() {
+        let defaults = makeDefaults()
+        SoundSettingsStore(defaults: defaults).setSound(.beep)   // touch the store, but not the volume key
+        XCTAssertEqual(SoundSettingsStore(defaults: defaults).voiceVolume, 1.0, accuracy: 1e-9)
+    }
+
+    func testVoiceVolumeClampsToUnitRange() {
+        let defaults = makeDefaults()
+        let store = SoundSettingsStore(defaults: defaults)
+        store.setVoiceVolume(5)
+        XCTAssertEqual(store.voiceVolume, 1.0, accuracy: 1e-9)
+        store.setVoiceVolume(-3)
+        XCTAssertEqual(store.voiceVolume, 0.0, accuracy: 1e-9)
+    }
 }

@@ -38,9 +38,13 @@ enum VoiceSampleFactory {
         var table: [[Float]] = []
         table.reserveCapacity(maxNumber)
         for n in 1...maxNumber {
-            // Trim so the spoken word's onset is at frame 0 (the ONSET requirement); the clip is already
-            // pre-trimmed and normalized, so in practice this only shaves a hair of lead-in.
-            table.append(trimSilence(loadClip(named: "voice_\(n)", sampleRate: sampleRate)))
+            // Align the spoken word's PERCEPTUAL onset to frame 0 — not merely its acoustic onset. A
+            // consonant-initial number ("seven", "six") has a soft lead-in before its vowel, so trimming
+            // only silence still leaves the *perceived* beat (the vowel) tens of ms late — which is why
+            // the count read "a skosh slow". `alignPerceptualOnset` shaves that sub-perceptual lead-in
+            // (bounded, so a strong consonant is never gutted) so the count lands ON the beat.
+            table.append(alignPerceptualOnset(loadClip(named: "voice_\(n)", sampleRate: sampleRate),
+                                              sampleRate: sampleRate))
         }
         // If nothing loaded at all (e.g. resources absent), report failure so the engine keeps clicking.
         return table.allSatisfy(\.isEmpty) ? [] : table
@@ -153,6 +157,52 @@ enum VoiceSampleFactory {
               let last = samples.lastIndex(where: { abs($0) >= threshold }) else { return [] }
         if first == 0 && last == samples.count - 1 { return samples }
         return Array(samples[first...last])
+    }
+
+    /// Aligns a spoken NUMBER's **perceptual onset** (roughly the vowel — where the word becomes clearly
+    /// audible) to frame 0, so the count lands ON the beat rather than a hair late.
+    ///
+    /// ## Why this exists (the "skosh slow" fix)
+    /// `trimSilence` puts the *acoustic* onset at frame 0 — the very first faint sample of a leading
+    /// consonant (its threshold is ~2% of peak). But a listener locks onto a word's **perceptual centre**,
+    /// near the vowel onset, which for a consonant-initial number ("**s**even", "**s**ix", "**th**ree")
+    /// arrives tens of ms after that faint start. Scheduling the acoustic onset on the beat therefore
+    /// *sounds* late. Measuring the bundled clips confirmed they carry almost no untrimmed silence (raw vs
+    /// trimmed differ by only a few ms), so the lateness is this perceptual-onset gap, not stray silence.
+    ///
+    /// ## What it does
+    /// After trimming outer silence, it finds the first sample reaching `onsetFraction` of the clip's peak
+    /// (the vowel/loud-body onset) and removes the sub-perceptual lead-in up to just before it — but never
+    /// more than `maxLeadSeconds` (so a genuinely long, audible consonant is preserved, not gutted) — with
+    /// a short fade-in so the cut can't click. The result's frame 0 is the *perceived* onset, which the
+    /// engine then schedules on the beat. Adaptive per clip: a vowel-initial word ("eight", "eleven") is
+    /// barely touched; a consonant-initial one is pulled forward up to the cap. At `maxLeadSeconds == 0`
+    /// this is exactly `trimSilence` (the original behaviour), so it can be dialled off.
+    static func alignPerceptualOnset(_ samples: [Float],
+                                     sampleRate: Double,
+                                     maxLeadSeconds: Double = 0.03,
+                                     onsetFraction: Float = 0.30,
+                                     guardSeconds: Double = 0.006) -> [Float] {
+        let trimmed = trimSilence(samples)
+        guard !trimmed.isEmpty, sampleRate > 0, maxLeadSeconds > 0 else { return trimmed }
+        var peak: Float = 0
+        for s in trimmed { peak = max(peak, abs(s)) }
+        guard peak > 0 else { return trimmed }
+        let threshold = onsetFraction * peak
+        guard let perceptualOnset = trimmed.firstIndex(where: { abs($0) >= threshold }) else { return trimmed }
+        let guardFrames = max(0, Int(guardSeconds * sampleRate))
+        let maxLeadFrames = max(0, Int(maxLeadSeconds * sampleRate))
+        // Trim up to just before the perceptual onset (keeping a short guard of the attack), bounded by
+        // the max lead so a long consonant is never fully removed.
+        let cut = min(max(0, perceptualOnset - guardFrames), maxLeadFrames)
+        guard cut > 0 else { return trimmed }
+        var result = Array(trimmed[cut...])
+        // Fade the first couple of ms in so removing the lead-in can't introduce a click.
+        let fade = min(result.count, max(1, Int(0.003 * sampleRate)))
+        for j in 0..<fade {
+            result[j] *= Float(j) / Float(fade)
+        }
+        return result
     }
 
     /// Tightens a counting *syllable* buffer for fast subdivision counting: trims outer near-silence a hair

@@ -17,7 +17,6 @@ struct ContentView: View {
     /// timing is sample-accurate in the audio engine and never depends on this timer.
     @State private var ticker = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
     @State private var showSettings = false
-    @State private var showSmartImport = false
 
     // Save-as-Song: an explicit, confirmed flow. The bookmark opens a name prompt; only "Save" persists
     // (so cancelling leaves nothing behind), and a brief banner confirms the song reached the library.
@@ -81,10 +80,6 @@ struct ContentView: View {
                          soundSettings: soundSettings, recents: recents, store: store)
                 .preferredColorScheme(.dark)
         }
-        .sheet(isPresented: $showSmartImport) {
-            SmartImportView(metronome: viewModel, store: store)
-                .preferredColorScheme(.dark)
-        }
         .alert("Save as Song", isPresented: $showSaveSongDialog) {
             TextField("Song name", text: $newSongName)
             Button("Save", action: saveAsSong)
@@ -114,8 +109,8 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        // Title centred via a ZStack so the leading (settings) and trailing (import + save) controls don't
-        // pull it off-centre.
+        // Title centred via a ZStack so the leading (settings) and trailing (save) controls don't pull it
+        // off-centre. (The experimental photo Smart Import is intentionally not surfaced here — see below.)
         ZStack {
             Text("MAELZEL")
                 .font(.system(size: 14, weight: .heavy, design: .rounded))
@@ -132,21 +127,12 @@ struct ContentView: View {
 
                 Spacer()
 
-                HStack(spacing: 18) {
-                    Button { showSmartImport = true } label: {
-                        Image(systemName: "camera.viewfinder")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                    .accessibilityLabel("Import from photo")
-
-                    Button(action: presentSaveSong) {
-                        Image(systemName: "bookmark")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                    .accessibilityLabel("Save as song")
+                Button(action: presentSaveSong) {
+                    Image(systemName: "bookmark")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary)
                 }
+                .accessibilityLabel("Save as song")
             }
         }
         .padding(.top, 4)

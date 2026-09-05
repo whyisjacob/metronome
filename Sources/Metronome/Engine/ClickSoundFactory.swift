@@ -85,7 +85,23 @@ enum ClickSoundFactory {
         if let s = base[.strong], let n = base[.normal] {
             withMedium[.medium] = mediumSpec(strong: s, normal: n)
         }
+        if let n = base[.normal] {
+            withMedium[.pickup] = pickupSpec(normal: n)
+        }
         return withMedium
+    }
+
+    /// The pickup / count-in voice: the sound's NORMAL click dropped a perfect fifth in pitch, at a
+    /// slightly reduced (still clearly unaccented) gain. The lower pitch makes it audibly DISTINCT from
+    /// both the strong downbeat and the normal beat ("a slightly different tune"), so a lead-in reads as a
+    /// lead-in and is never mistaken for the downbeat. Derived per-sound so every timbre gains a matching
+    /// pickup with no per-sound tuning, and without touching the strong/normal/weak specs the accuracy
+    /// tests render against.
+    static func pickupSpec(normal n: Spec) -> Spec {
+        var s = n
+        s.frequency = n.frequency * (2.0 / 3.0)   // a perfect fifth below the normal click
+        s.gain = n.gain * 0.9
+        return s
     }
 
     /// The secondary-accent voice: field-wise mid-point between the strong and normal specs. Its timbre

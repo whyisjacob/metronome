@@ -18,7 +18,9 @@ enum AppControl: String, CaseIterable {
 
     // Everything else — consolidated into the single collapsible Settings screen.
     case sectionBuilder     // entry point to the section / tempo-map builder (saves into the Songs library)
+    case countIn            // pickup / count-in: a lead-in of tail-of-bar beats before the first downbeat
     case voiceCounting      // Voice: speak subdivisions aloud
+    case voiceVolume        // Voice: spoken volume (independent of the click volume)
     case swing              // swing / shuffle amount
     case rhythmCell         // idiomatic sixteenth-grid pattern picker
     case accents            // per-beat accent pattern
@@ -32,6 +34,7 @@ enum AppControl: String, CaseIterable {
 /// these, and every non-base `AppControl` maps to one of them.
 enum SettingsSection: String, CaseIterable, Identifiable {
     case sections
+    case countIn
     case voice
     case groove
     case accents
@@ -45,6 +48,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .sections:    return "Sections"
+        case .countIn:     return "Count-in"
         case .voice:       return "Voice"
         case .groove:      return "Groove"
         case .accents:     return "Accents"
@@ -59,6 +63,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .sections:    return "rectangle.stack.badge.plus"
+        case .countIn:     return "1.circle.fill"
         case .voice:       return "person.wave.2.fill"
         case .groove:      return "waveform.path"
         case .accents:     return "chart.bar.fill"
@@ -84,7 +89,9 @@ extension AppControl {
         case .tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound:
             return .mainScreen
         case .sectionBuilder:  return .settings(.sections)
+        case .countIn:         return .settings(.countIn)
         case .voiceCounting:   return .settings(.voice)
+        case .voiceVolume:     return .settings(.voice)
         case .swing:           return .settings(.groove)
         case .rhythmCell:      return .settings(.groove)
         case .accents:         return .settings(.accents)

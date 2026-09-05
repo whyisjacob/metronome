@@ -169,6 +169,7 @@ private struct BallIndicator: View {
         case .normal: return Theme.accentNormal
         case .weak:   return Theme.accentNormal.opacity(0.7)
         case .muted:  return Theme.surfaceRaised
+        case .pickup: return Theme.accentPickup    // count-in lead-in beat — a distinct, cool colour
         }
     }
 

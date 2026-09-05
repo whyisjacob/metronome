@@ -24,8 +24,14 @@ final class RenderPlan {
     /// so it is captured immutably here and consulted per tick by the audio thread. Disabled by default,
     /// which makes the whole plan behave byte-for-byte as before (the accuracy tests never enable it).
     let trainer: GapTrainer
+    /// The pickup / count-in overlay. Like `trainer`, it changes only labeling (accent, spoken number,
+    /// beat index) — never *when* a tick sounds (a pickup beat is just a beat on the same closed-form
+    /// grid) — so it is captured immutably and consulted per tick. `.none` by default, which makes the
+    /// whole plan behave byte-for-byte as before (all the accuracy/RenderPlan-equality tests use `.none`).
+    let pickup: Pickup
 
-    init(config: MetronomeConfiguration, sampleRate: Double, trainer: GapTrainer = GapTrainer()) {
+    init(config: MetronomeConfiguration, sampleRate: Double,
+         trainer: GapTrainer = GapTrainer(), pickup: Pickup = .none) {
         self.ticksPerBeat = config.ticksPerBeat
         self.beatsPerBar = config.beatsPerBar
         self.accents = config.accents
@@ -34,6 +40,7 @@ final class RenderPlan {
         self.swing = config.swing
         self.cell = config.cell
         self.trainer = trainer
+        self.pickup = pickup
     }
 
     /// Seconds between two consecutive clicks (beats *and* subdivisions) — the inverse of the frame math.
@@ -113,22 +120,52 @@ final class RenderPlan {
 
     /// Emphasis of tick `n` (global tick index from playback start). A muted beat silences its whole span
     /// (on-beat click and its subdivisions); the engine still publishes the pulse for it.
+    ///
+    /// With a pickup active, the lead-in beats (global beat `< k`, or the first `k` of each cycle when
+    /// repeating) are **never** the strong accent: their on-beat click is the distinct `.pickup` lead-in
+    /// tone and their subdivisions are `.weak`. Every real beat after the pickup uses the normal accent
+    /// pattern, indexed by the pickup-shifted beat so the downbeat is "1". With no pickup this is exactly
+    /// the original mapping.
     @inline(__always)
     func accentLevel(forTick n: Int) -> AccentLevel {
-        let beat = (n / ticksPerBeat) % beatsPerBar
+        let g = n / ticksPerBeat
+        let pos = n % ticksPerBeat
+        if pickup.isEnabled {
+            if pickup.isPickupBeat(globalBeat: g, beatsPerBar: beatsPerBar) {
+                return pos == 0 ? .pickup : .weak
+            }
+            return coreAccentLevel(beat: pickup.beatInBar(globalBeat: g, beatsPerBar: beatsPerBar), pos: pos)
+        }
+        return coreAccentLevel(beat: g % beatsPerBar, pos: pos)
+    }
+
+    /// The accent for beat index `beat` at in-beat position `pos` — the original per-tick rule (mute → cell
+    /// silence → subdivision weak → the beat's own accent). Factored out so the pickup path can reuse it
+    /// verbatim with a shifted beat index.
+    @inline(__always)
+    private func coreAccentLevel(beat: Int, pos: Int) -> AccentLevel {
         let beatAccent = accents.indices.contains(beat) ? accents[beat] : .normal
         if beatAccent == .muted { return .muted }
-        let pos = n % ticksPerBeat
         if cell.silences(posInBeat: pos, ticksPerBeat: ticksPerBeat) { return .muted }  // cell-silenced tick
         guard pos == 0 else { return .weak }
         return beatAccent.audioLevel
     }
 
-    /// Beat index within the bar for tick `n`, or `nil` if `n` is a subdivision click.
+    /// Whether tick `n` belongs to a pickup (count-in lead-in) beat. Used by the render/pulse path to
+    /// pick the lead-in sound, and asserted directly by the pickup tests.
+    @inline(__always)
+    func isPickup(forTick n: Int) -> Bool {
+        pickup.isPickupBeat(globalBeat: n / ticksPerBeat, beatsPerBar: beatsPerBar)
+    }
+
+    /// Beat index within the bar for tick `n`, or `nil` if `n` is a subdivision click. Pickup-shifted so a
+    /// pickup beat reports its tail-of-bar index and the downbeat reports 0.
     @inline(__always)
     func beatIndex(forTick n: Int) -> Int? {
         guard n % ticksPerBeat == 0 else { return nil }
-        return (n / ticksPerBeat) % beatsPerBar
+        let g = n / ticksPerBeat
+        if pickup.isEnabled { return pickup.beatInBar(globalBeat: g, beatsPerBar: beatsPerBar) }
+        return g % beatsPerBar
     }
 
     /// The Voice token for tick `n` (global tick from playback start) — which spoken number or syllable
@@ -146,9 +183,18 @@ final class RenderPlan {
     func voiceToken(forTick n: Int) -> VoiceToken {
         let tpb = ticksPerBeat
         let posInBeat = n % tpb
+        let g = n / tpb
         if posInBeat == 0 {
-            let beat = (n / tpb) % beatsPerBar
+            // The spoken count for this beat — pickup-shifted, so a pickup beat speaks its tail-of-bar
+            // number ("…3, 4") and the first real beat speaks "1".
+            let beat = pickup.isEnabled ? pickup.beatInBar(globalBeat: g, beatsPerBar: beatsPerBar)
+                                        : g % beatsPerBar
             return .number(beat)
+        }
+        // A pickup counts its BEATS; its in-between subdivisions click (never speak a syllable) so the
+        // lead-in stays crisp and clearly a count-in.
+        if pickup.isEnabled, pickup.isPickupBeat(globalBeat: g, beatsPerBar: beatsPerBar) {
+            return .none
         }
         switch tpb {
         case 2:  return .syllable(.and)                              // eighth off-beat

@@ -68,6 +68,9 @@ final class MetronomeEngine {
         /// beat numbers still speak cleanly. Default on. Read live by the render callback; never affects
         /// onset timing.
         var speakSubdivisions = true
+        /// Voice-mode gain applied to SPOKEN tokens (numbers + syllables) only, independent of the click
+        /// volume. Clicks are never scaled, so the accuracy-critical click path is unchanged. Default 1.0.
+        var voiceVolume: Double = 1.0
         /// Sample rate `voiceTable` was rendered at (0 = none) and the rate currently rendering in the
         /// background (0 = idle). Guard the lazy voice render so it publishes/re-renders exactly once.
         var voiceRate: Double = 0
@@ -137,6 +140,9 @@ final class MetronomeEngine {
     private var atClassicTable: [[Float]] = []
     private var atVoiceMode = false
     private var atSpeakSubdivisions = true
+    /// Audio-thread snapshot of the spoken-voice gain (see `Control.voiceVolume`). Applied in `mix` to
+    /// spoken tables only; 1.0 for clicks, so the click path is byte-for-byte unchanged.
+    private var atVoiceVolume: Double = 1.0
     /// The single-tempo plan the audio thread is currently scheduling from. Compared by identity against
     /// the published plan each block to detect a live swap (a new `RenderPlan` from `update(_:)`); `nil`
     /// after a reset so the first plan anchors cleanly. Audio-thread-only, so no synchronization needed.
@@ -161,6 +167,9 @@ final class MetronomeEngine {
     /// The gap-click trainer overlay applied to single-tempo playback (never to songs). Held here so a
     /// live toggle republishes the plan seamlessly; captured into every `RenderPlan` this engine builds.
     private(set) var currentTrainer = GapTrainer()
+    /// The pickup / count-in overlay applied to single-tempo playback (never to songs). Held here and
+    /// captured into every single-tempo `RenderPlan`, so pressing Start replays the lead-in from tick 0.
+    private(set) var currentPickup = Pickup.none
     /// The song most recently handed to `startSong(_:)`, for reference by the UI/view model.
     private(set) var currentSong: Song?
     /// Which mode the last `start*` selected, so an interruption/route recovery resumes the right one.
@@ -174,7 +183,8 @@ final class MetronomeEngine {
     func update(_ config: MetronomeConfiguration) {
         currentConfig = config
         guard configuredSampleRate > 0 else { return }
-        let plan = RenderPlan(config: config, sampleRate: configuredSampleRate, trainer: currentTrainer)
+        let plan = RenderPlan(config: config, sampleRate: configuredSampleRate,
+                              trainer: currentTrainer, pickup: currentPickup)
         control.withLock { $0.plan = plan }
         applySound(config.sound)
     }
@@ -188,8 +198,29 @@ final class MetronomeEngine {
     func setTrainer(_ trainer: GapTrainer) {
         currentTrainer = trainer
         guard configuredSampleRate > 0 else { return }
-        let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate, trainer: trainer)
+        let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate,
+                              trainer: trainer, pickup: currentPickup)
         control.withLock { if $0.songPlan == nil { $0.plan = plan } }
+    }
+
+    // MARK: - Pickup / count-in
+
+    /// Applies a new pickup / count-in overlay. Republishes the single-tempo plan (never a song) so the
+    /// count-in takes effect on the next Start (playback replays from tick 0); it is phase-compatible
+    /// (same meter/subdivision) so a live change never disrupts a running grid. See `Pickup`.
+    func setPickup(_ pickup: Pickup) {
+        currentPickup = pickup
+        guard configuredSampleRate > 0 else { return }
+        let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate,
+                              trainer: currentTrainer, pickup: pickup)
+        control.withLock { if $0.songPlan == nil { $0.plan = plan } }
+    }
+
+    /// Sets the voice-mode gain applied to SPOKEN tokens (numbers + subdivision syllables), independent of
+    /// the click volume. Read live by the render callback (no plan rebuild, no timing change); clicks are
+    /// never scaled, so the sample-accurate click path is byte-for-byte unchanged. Default 1.0.
+    func setVoiceVolume(_ volume: Double) {
+        control.withLock { $0.voiceVolume = max(0, min(1, volume)) }
     }
 
     // MARK: - Sound selection
@@ -279,7 +310,8 @@ final class MetronomeEngine {
         guard !isManualRendering else { return }
         try ensureRealtimeEngineRunning()
         applySound(currentConfig.sound)     // (re)build the selected timbre / voice at the live rate
-        let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate, trainer: currentTrainer)
+        let plan = RenderPlan(config: currentConfig, sampleRate: configuredSampleRate,
+                              trainer: currentTrainer, pickup: currentPickup)
         songModeActive = false
         control.withLock {
             $0.plan = plan
@@ -440,7 +472,8 @@ final class MetronomeEngine {
     func renderOffline(config: MetronomeConfiguration, seconds: Double) throws -> [Float] {
         update(config)
         control.withLock {
-            $0.plan = RenderPlan(config: config, sampleRate: configuredSampleRate, trainer: currentTrainer)
+            $0.plan = RenderPlan(config: config, sampleRate: configuredSampleRate,
+                                 trainer: currentTrainer, pickup: currentPickup)
             $0.songPlan = nil
             $0.running = true
             $0.resetRequested = true
@@ -476,7 +509,8 @@ final class MetronomeEngine {
                                totalSeconds: Double) throws -> (samples: [Float], changeFrame: Int) {
         update(first)
         control.withLock {
-            $0.plan = RenderPlan(config: first, sampleRate: configuredSampleRate, trainer: currentTrainer)
+            $0.plan = RenderPlan(config: first, sampleRate: configuredSampleRate,
+                                 trainer: currentTrainer, pickup: currentPickup)
             $0.songPlan = nil
             $0.running = true
             $0.resetRequested = true
@@ -547,6 +581,7 @@ final class MetronomeEngine {
         var classicTable: [[Float]] = []
         var voiceMode = false
         var speakSubdivisions = true
+        var voiceVolume = 1.0
         control.withLockUnchecked { c in
             running = c.running
             plan = c.plan
@@ -557,6 +592,7 @@ final class MetronomeEngine {
             classicTable = c.classicTable
             voiceMode = c.voiceMode
             speakSubdivisions = c.speakSubdivisions
+            voiceVolume = c.voiceVolume
             if c.resetRequested { c.resetRequested = false; didReset = true }
         }
         atSelectedTable = selectedTable
@@ -565,6 +601,7 @@ final class MetronomeEngine {
         atClassicTable = classicTable
         atVoiceMode = voiceMode
         atSpeakSubdivisions = speakSubdivisions
+        atVoiceVolume = voiceVolume
 
         // Start from silence; voices/ticks mix in additively.
         for buffer in ablPtr {
@@ -840,6 +877,9 @@ final class MetronomeEngine {
 
         let fade = atState.voices[vi].fadeRemaining
         let releaseLen = max(voiceReleaseFrames, 1)
+        // Spoken tokens (numbers/syllables) are scaled by the voice volume; clicks stay at unity gain, so
+        // the sample-accurate click path is byte-for-byte unchanged (default voiceVolume == 1.0 anyway).
+        let voiceGain: Float = isSpokenTable(atState.voices[vi].table) ? Float(atVoiceVolume) : 1.0
 
         // Hard-cut path (Voice mode only): mix up to the cut with a short declick, then stop this token —
         // it is being replaced by the next count. Wholly separate so the default path below stays exact.
@@ -851,7 +891,7 @@ final class MetronomeEngine {
                     for buffer in abl {
                         guard let base = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
                         for k in 0..<mixN {
-                            var gain: Float = 1
+                            var gain: Float = voiceGain
                             if fade >= 0 {
                                 let f = fade - k
                                 if f <= 0 { break }
@@ -874,14 +914,14 @@ final class MetronomeEngine {
                 guard let base = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
                 if fade < 0 {
                     for k in 0..<n {
-                        base[startFrame + k] += src[playhead + k]
+                        base[startFrame + k] += src[playhead + k] * voiceGain
                     }
                 } else {
                     // Release ramp: gain falls from (fade/releaseLen) to 0 across the remaining frames.
                     for k in 0..<n {
                         let f = fade - k
                         guard f > 0 else { break }
-                        base[startFrame + k] += src[playhead + k] * (Float(f) / Float(releaseLen))
+                        base[startFrame + k] += src[playhead + k] * (Float(f) / Float(releaseLen)) * voiceGain
                     }
                 }
             }

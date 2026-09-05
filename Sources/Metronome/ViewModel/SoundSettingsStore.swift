@@ -13,12 +13,15 @@ final class SoundSettingsStore: ObservableObject {
     @Published private(set) var sound: MetronomeSound
     /// In Voice mode, speak the in-between subdivision syllables ("1 e and a"). On by default.
     @Published private(set) var speakSubdivisions: Bool
+    /// Voice-mode spoken volume (0…1), independent of the click volume. Full (1.0) by default.
+    @Published private(set) var voiceVolume: Double
 
     private let defaults: UserDefaults
 
     private enum Keys {
         static let sound = "sound.selected"
         static let speakSubdivisions = "sound.speakSubdivisions"
+        static let voiceVolume = "sound.voiceVolume"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -28,6 +31,9 @@ final class SoundSettingsStore: ObservableObject {
         // Speaking the subdivisions is the default: an *absent* key must read as `true` (not the `false`
         // that `bool(forKey:)` would give), so "1 e and a" is on out of the box.
         self.speakSubdivisions = defaults.object(forKey: Keys.speakSubdivisions) as? Bool ?? true
+        // Full voice volume by default: an absent key must read as 1.0 (not the 0.0 `double(forKey:)`
+        // would give), so the voice isn't silent out of the box.
+        self.voiceVolume = (defaults.object(forKey: Keys.voiceVolume) as? Double) ?? 1.0
     }
 
     func setSound(_ sound: MetronomeSound) {
@@ -38,5 +44,12 @@ final class SoundSettingsStore: ObservableObject {
     func setSpeakSubdivisions(_ on: Bool) {
         speakSubdivisions = on
         defaults.set(on, forKey: Keys.speakSubdivisions)
+    }
+
+    /// Sets the voice volume (clamped to 0…1) and persists it.
+    func setVoiceVolume(_ volume: Double) {
+        let clamped = max(0, min(1, volume))
+        voiceVolume = clamped
+        defaults.set(clamped, forKey: Keys.voiceVolume)
     }
 }

@@ -45,13 +45,20 @@ final class SettingsCatalogTests: XCTestCase {
                        "a Settings section has no control, or a control references a missing section")
     }
 
-    func testSettingsSectionsAreTheExpectedEightInOrder() {
+    func testSettingsSectionsAreTheExpectedNineInOrder() {
         XCTAssertEqual(SettingsSection.allCases.map(\.rawValue),
-                       ["sections", "voice", "groove", "accents", "visuals", "borderFlash", "gapTrainer", "recents"])
+                       ["sections", "countIn", "voice", "groove", "accents", "visuals",
+                        "borderFlash", "gapTrainer", "recents"])
         for section in SettingsSection.allCases {
             XCTAssertFalse(section.title.isEmpty, "\(section) has no title")
             XCTAssertFalse(section.systemImage.isEmpty, "\(section) has no icon")
         }
+    }
+
+    /// The pickup / count-in control lives in its own "Count-in" Settings section (not stranded on the
+    /// main screen, which stays the base controls only).
+    func testCountInLivesInTheCountInSettingsSection() {
+        XCTAssertEqual(AppControl.countIn.placement, .settings(.countIn))
     }
 
     /// Placement is total and single-valued: every control is exactly one of base / settings, and the two
