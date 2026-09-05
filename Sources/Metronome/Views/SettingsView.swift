@@ -146,12 +146,18 @@ struct SettingsView: View {
         }
     }
 
-    /// A one-line summary of the Groove section: swing amount and/or the active cell, or "Off".
+    /// A one-line summary of the Groove section: the swing amount and/or the active cell — but only when they
+    /// are actually audible at the current subdivision, so the collapsed row never claims a groove is on while
+    /// playback is straight. Swing needs the eighth/sixteenth grid; a cell needs the sixteenth grid (the
+    /// self-activating controls advance the subdivision to make them audible when you turn them on).
     private var grooveSummary: String {
-        let swingPct = Int((viewModel.swing * 100).rounded())
         var parts: [String] = []
-        if swingPct > 0 { parts.append("Swing \(swingPct)%") }
-        if viewModel.cell != .straight { parts.append(viewModel.cell.displayName) }
+        if viewModel.swingIsAudible {
+            parts.append("Swing \(Int((viewModel.swing * 100).rounded()))%")
+        }
+        if viewModel.cellIsActive {
+            parts.append(viewModel.cell.displayName)
+        }
         return parts.isEmpty ? "Off" : parts.joined(separator: " · ")
     }
 

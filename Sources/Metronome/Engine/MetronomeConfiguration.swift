@@ -80,6 +80,18 @@ struct MetronomeConfiguration: Equatable, Codable {
     /// Total clicks in one bar.
     var ticksPerBar: Int { ticksPerBeat * beatsPerBar }
 
+    // MARK: - Groove activation state
+
+    /// Whether swing can actually be *heard* at the current subdivision, as opposed to merely being set.
+    /// Swing only displaces the off-beat members of eighth/sixteenth pairs (`SwingGrid.swings`), so at a
+    /// quarter, triplet, tuplet or compound-eighth grid a non-zero `swing` is inert. The UI reads this to
+    /// tell the truth — it never labels playback "swung" while the grid renders it straight.
+    var swingIsAudible: Bool { swing > 0 && SwingGrid.swings(ticksPerBeat: ticksPerBeat) }
+
+    /// Whether the selected rhythm cell can actually apply. Cells silence sub-positions of the **sixteenth**
+    /// grid only (`RhythmCell.silences` requires `ticksPerBeat == 4`), so a cell is inert on any other grid.
+    var cellIsActive: Bool { cell != .straight && ticksPerBeat == 4 }
+
     /// Frames between consecutive clicks at `sampleRate` (may be fractional).
     func framesPerTick(sampleRate: Double) -> Double {
         secondsPerTick * sampleRate

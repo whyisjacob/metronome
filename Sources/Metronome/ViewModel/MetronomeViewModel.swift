@@ -48,8 +48,13 @@ final class MetronomeViewModel: ObservableObject {
     var sound: MetronomeSound { config.sound }
     /// Swing / shuffle amount (0…1); 0 is straight.
     var swing: Double { config.swing }
+    /// Whether swing is actually audible at the current subdivision (an eighth/sixteenth grid) rather than
+    /// merely set — the Groove UI reads this so it never claims a swing that the grid renders straight.
+    var swingIsAudible: Bool { config.swingIsAudible }
     /// The idiomatic sixteenth-grid cell currently applied (`.straight` = off).
     var cell: RhythmCell { config.cell }
+    /// Whether the selected cell actually applies at the current subdivision (the sixteenth grid).
+    var cellIsActive: Bool { config.cellIsActive }
     /// Whether Voice mode speaks the in-between subdivision syllables (persisted; default on).
     var speakSubdivisions: Bool { soundSettings?.speakSubdivisions ?? true }
 
@@ -121,10 +126,33 @@ final class MetronomeViewModel: ObservableObject {
 
     /// Sets the swing / shuffle amount (0…1). Clamped by the config initializer. Delays the off-beat
     /// eighth/sixteenth pair members toward the triplet position; the main beats never move.
-    func setSwing(_ value: Double) { updateConfig { $0.swing = value } }
+    ///
+    /// **Self-activating:** swing only shapes the eighth/sixteenth grid, so turning it on from a grid it
+    /// can't affect (quarter — the app default — triplet, or a tuplet) also advances the subdivision to
+    /// eighths: enabling swing *is* a request for a swung eighth-note feel. Both writes happen in the one
+    /// `updateConfig` closure, so the plan is rebuilt and published exactly once (live, if playing). Setting
+    /// swing back to 0 deliberately leaves the subdivision where it is — only activation auto-advances.
+    func setSwing(_ value: Double) {
+        updateConfig {
+            $0.swing = value
+            if value > 0, $0.subdivision != .eighth, $0.subdivision != .sixteenth {
+                $0.subdivision = .eighth
+            }
+        }
+    }
 
     /// Selects an idiomatic rhythm cell (sixteenth grid only; `.straight` = off).
-    func setCell(_ cell: RhythmCell) { updateConfig { $0.cell = cell } }
+    ///
+    /// **Self-activating:** a cell *is* a sixteenth-grid figure, so selecting a non-straight cell from any
+    /// other grid also advances the subdivision to sixteenths — in the same single `updateConfig` publish.
+    func setCell(_ cell: RhythmCell) {
+        updateConfig {
+            $0.cell = cell
+            if cell != .straight, $0.subdivision != .sixteenth {
+                $0.subdivision = .sixteenth
+            }
+        }
+    }
 
     func setSound(_ sound: MetronomeSound) {
         updateConfig { $0.sound = sound }
