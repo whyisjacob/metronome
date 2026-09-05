@@ -11,6 +11,10 @@ struct SongSectionEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let sectionID: UUID
+    /// The section's pickup, carried through unchanged (this screen has no pickup control yet). `built`
+    /// re-emits it so an edit never drops it, and the `SongSection` initializer re-clamps it if a
+    /// meter/subdivision change here shrinks the bar.
+    private let pickupTicks: Int
     /// Called on EVERY change to the working section, so edits are committed to the song continuously and
     /// an in-progress edit survives a force-quit (the builder autosaves each one). See P2.6.
     private let onCommit: (SongSection) -> Void
@@ -30,6 +34,7 @@ struct SongSectionEditorView: View {
          onCommit: @escaping (SongSection) -> Void,
          onCancel: @escaping () -> Void) {
         self.sectionID = section.id
+        self.pickupTicks = section.pickupTicks
         self.onCommit = onCommit
         self.onCancel = onCancel
         _editVM = StateObject(wrappedValue: MetronomeViewModel(config: section.configuration))
@@ -45,7 +50,7 @@ struct SongSectionEditorView: View {
         return SongSection(id: sectionID, name: name, tempoBPM: c.bpm,
                            timeSignature: c.timeSignature, subdivision: c.subdivision,
                            accentPattern: c.accents, bars: bars, repeatCount: repeatCount,
-                           swing: c.swing, cell: c.cell)
+                           swing: c.swing, cell: c.cell, pickupTicks: pickupTicks)
     }
 
     var body: some View {

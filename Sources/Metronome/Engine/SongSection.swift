@@ -41,6 +41,13 @@ struct SongSection: Identifiable, Equatable, Codable {
     /// A preset idiomatic rhythm cell on the sixteenth grid — same model as `MetronomeConfiguration.cell`.
     /// `.straight` (the default) sounds every sixteenth.
     var cell: RhythmCell
+    /// Optional pickup (anacrusis) at the START of this section, in CURRENT-GRID TICKS (0 = none, the
+    /// default). It is the section's own first-bar TAIL — the last `pickupTicks` ticks of bar 1 — offered
+    /// as a one-time lead-in when you START or SEEK to this section (never repeated on a continuous pass;
+    /// the engine hooks it at the seek). Clamped to `0 … ticksPerBar−1` (a pickup is an *incomplete* bar)
+    /// and re-clamped automatically whenever this section's meter/subdivision change — because those change
+    /// `ticksPerBar` and the section is rebuilt through this initializer. Reuses the proven `Pickup` model.
+    var pickupTicks: Int
 
     init(id: UUID = UUID(),
          name: String = "Section",
@@ -51,7 +58,8 @@ struct SongSection: Identifiable, Equatable, Codable {
          bars: Int = 1,
          repeatCount: Int = 1,
          swing: Double = 0,
-         cell: RhythmCell = .straight) {
+         cell: RhythmCell = .straight,
+         pickupTicks: Int = 0) {
         self.id = id
         self.name = name
         self.tempoBPM = tempoBPM.clamped(to: MetronomeConfiguration.tempoRange)
@@ -61,6 +69,11 @@ struct SongSection: Identifiable, Equatable, Codable {
         self.repeatCount = repeatCount.clamped(to: SongSection.repeatRange)
         self.swing = swing.clamped(to: MetronomeConfiguration.swingRange)
         self.cell = cell
+        // Clamp the pickup to this section's grid (0 … ticksPerBar−1) via the proven `Pickup` rule. Computed
+        // from the LOCAL params (not `self`, which isn't fully initialized yet); re-runs on every rebuild, so
+        // a meter/subdivision change that shrinks the bar re-clamps a now-too-long pickup automatically.
+        let barTicks = subdivision.ticksPerBeat(compound: timeSignature.isCompound) * timeSignature.beatsPerBar
+        self.pickupTicks = Pickup(ticks: pickupTicks).effectiveTicks(ticksPerBar: barTicks)
         // With no explicit pattern, adopt the meter's sensible default (downbeat + secondary group-head
         // accents), matching the single-tempo engine so a 6/8 section is felt in 2 by default.
         self.accentPattern = MetronomeConfiguration.normalizedAccents(accentPattern ?? timeSignature.defaultAccents,
@@ -68,10 +81,12 @@ struct SongSection: Identifiable, Equatable, Codable {
     }
 
     // Decode through the validating initializer so a hand-edited or older JSON file can never load an
-    // out-of-range tempo, a zero bar/repeat count, or a mis-sized accent array. `swing`/`cell` are
-    // tolerated-if-missing so pre-groove song files still load (as straight).
+    // out-of-range tempo, a zero bar/repeat count, or a mis-sized accent array. `swing`/`cell`/`pickupTicks`
+    // are tolerated-if-missing so pre-groove / pre-pickup song files (and exported `.maelzelsong` files)
+    // still load — as straight, with no pickup.
     enum CodingKeys: String, CodingKey {
         case id, name, tempoBPM, timeSignature, subdivision, accentPattern, bars, repeatCount, swing, cell
+        case pickupTicks
     }
 
     init(from decoder: Decoder) throws {
@@ -86,8 +101,12 @@ struct SongSection: Identifiable, Equatable, Codable {
         let repeatCount = try c.decodeIfPresent(Int.self, forKey: .repeatCount) ?? 1
         let swing = try c.decodeIfPresent(Double.self, forKey: .swing) ?? 0
         let cell = try c.decodeIfPresent(RhythmCell.self, forKey: .cell) ?? .straight
+        // Default 0 (no pickup) when the key is absent — a song saved/exported before this field decodes
+        // exactly as it always did. The init re-clamps it to this section's grid regardless.
+        let pickupTicks = try c.decodeIfPresent(Int.self, forKey: .pickupTicks) ?? 0
         self.init(id: id, name: name, tempoBPM: bpm, timeSignature: ts, subdivision: sub,
-                  accentPattern: accents, bars: bars, repeatCount: repeatCount, swing: swing, cell: cell)
+                  accentPattern: accents, bars: bars, repeatCount: repeatCount, swing: swing, cell: cell,
+                  pickupTicks: pickupTicks)
     }
 
     // MARK: - Derived timing (mirrors MetronomeConfiguration for a single section)

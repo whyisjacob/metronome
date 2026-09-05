@@ -52,7 +52,8 @@ extension SongSection {
                     bars: bars,
                     repeatCount: repeatCount,
                     swing: config.swing,
-                    cell: config.cell)
+                    cell: config.cell,
+                    pickupTicks: pickupTicks)   // preserve the section pickup (re-clamped to the new grid)
     }
 }
 
@@ -89,8 +90,9 @@ extension Song {
                  SongSection(id: UUID(), name: $0.name, tempoBPM: $0.tempoBPM,
                              timeSignature: $0.timeSignature, subdivision: $0.subdivision,
                              accentPattern: $0.accentPattern, bars: $0.bars, repeatCount: $0.repeatCount,
-                             swing: $0.swing, cell: $0.cell)
+                             swing: $0.swing, cell: $0.cell, pickupTicks: $0.pickupTicks)
              },
-             tempoScale: tempoScale)
+             tempoScale: tempoScale,
+             pickupTicks: pickupTicks)
     }
 }

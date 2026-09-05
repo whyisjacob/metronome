@@ -157,7 +157,7 @@ struct SongBuilderView: View {
         copy = SongSection(id: UUID(), name: copy.name + " copy", tempoBPM: copy.tempoBPM,
                            timeSignature: copy.timeSignature, subdivision: copy.subdivision,
                            accentPattern: copy.accentPattern, bars: copy.bars, repeatCount: copy.repeatCount,
-                           swing: copy.swing, cell: copy.cell)
+                           swing: copy.swing, cell: copy.cell, pickupTicks: copy.pickupTicks)
         song.sections.insert(copy, at: index + 1)
     }
 

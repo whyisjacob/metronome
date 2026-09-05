@@ -18,16 +18,22 @@ struct Song: Identifiable, Equatable, Codable {
     var sections: [SongSection]
     /// See `tempoScaleRange`. Default 1.0; persisted with the song.
     var tempoScale: Double
+    /// Optional pickup (anacrusis) at the very START of the song, in the FIRST section's grid ticks (0 =
+    /// none, the default). Like a section pickup it is a one-time lead-in before the song's first downbeat;
+    /// floored at 0 here and re-clamped to the first section's grid at playback via `Pickup.effectiveTicks`.
+    /// Persisted with the song; tolerated-if-missing so pre-pickup songs decode unchanged.
+    var pickupTicks: Int
 
     init(id: UUID = UUID(), name: String = "Untitled Song", sections: [SongSection] = [],
-         tempoScale: Double = 1.0) {
+         tempoScale: Double = 1.0, pickupTicks: Int = 0) {
         self.id = id
         self.name = name
         self.sections = sections
         self.tempoScale = tempoScale.clamped(to: Song.tempoScaleRange)
+        self.pickupTicks = max(0, pickupTicks)
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, sections, tempoScale }
+    enum CodingKeys: String, CodingKey { case id, name, sections, tempoScale, pickupTicks }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -37,6 +43,8 @@ struct Song: Identifiable, Equatable, Codable {
         // Tolerate pre-scale song files (missing key → 1.0) and clamp hostile values.
         self.tempoScale = (try c.decodeIfPresent(Double.self, forKey: .tempoScale) ?? 1.0)
             .clamped(to: Song.tempoScaleRange)
+        // Default 0 (no pickup) when absent — a song saved/exported before this field decodes as before.
+        self.pickupTicks = max(0, try c.decodeIfPresent(Int.self, forKey: .pickupTicks) ?? 0)
     }
 
     /// Total bars across every section (each section's bars × repeats).
@@ -67,8 +75,8 @@ struct Song: Identifiable, Equatable, Codable {
             SongSection(id: s.id, name: s.name, tempoBPM: (s.tempoBPM * tempoScale).rounded(),
                         timeSignature: s.timeSignature, subdivision: s.subdivision,
                         accentPattern: s.accentPattern, bars: s.bars, repeatCount: s.repeatCount,
-                        swing: s.swing, cell: s.cell)
+                        swing: s.swing, cell: s.cell, pickupTicks: s.pickupTicks)
         }
-        return Song(id: id, name: name, sections: scaled, tempoScale: 1.0)
+        return Song(id: id, name: name, sections: scaled, tempoScale: 1.0, pickupTicks: pickupTicks)
     }
 }
