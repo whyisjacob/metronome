@@ -27,9 +27,10 @@ struct SmartImportView: View {
                 ScrollView {
                     VStack(spacing: 18) {
                         switch vm.stage {
-                        case .chooser:    chooser
-                        case .processing: processing
-                        case .review:     review
+                        case .chooser:       chooser
+                        case .processing:    processing
+                        case .review:        review
+                        case .failed(let m): failure(m)
                         }
                     }
                     .padding(.horizontal, 18)
@@ -46,14 +47,32 @@ struct SmartImportView: View {
                 }
             }
         }
-        // PHPicker needs no permission; the camera uses NSCameraUsageDescription (see project.yml).
+        // PHPicker needs no permission; the camera uses NSCameraUsageDescription (see project.yml). This
+        // view owns dismissal — it flips the presenting binding when the picker finishes — so dismissal is
+        // deterministic and never depends on `@Environment(\.dismiss)` inside the picker (see PhotoPickers).
         .sheet(isPresented: $showLibrary) {
-            PhotoLibraryPicker { vm.process(image: $0) }
-                .ignoresSafeArea()
+            PhotoLibraryPicker { result in
+                showLibrary = false
+                handlePick(result)
+            }
+            .ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker { vm.process(image: $0) }
-                .ignoresSafeArea()
+            CameraPicker { result in
+                showCamera = false
+                handlePick(result)
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    /// React to a finished pick: OCR the chosen image, ignore a plain cancel, or surface a visible error on
+    /// a load failure — so a failure is never silent.
+    private func handlePick(_ result: ImagePickResult) {
+        switch result {
+        case .picked(let image): vm.process(image: image)
+        case .cancelled:         break   // user backed out — stay on the chooser
+        case .failed:            vm.failedToLoadImage()
         }
     }
 
@@ -104,6 +123,26 @@ struct SmartImportView: View {
                 .foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity, minHeight: 240)
+    }
+
+    // MARK: - Stage: failure (visible, never silent)
+
+    private func failure(_ message: String) -> some View {
+        VStack(spacing: 18) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 40))
+                .foregroundStyle(Theme.stop)
+            Text(message)
+                .font(.system(size: 16, weight: .semibold))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(Theme.textPrimary)
+            Button { vm.reset() } label: {
+                Text("Try again").frame(maxWidth: .infinity, minHeight: 54)
+            }
+            .buttonStyle(SelectableStyle(isOn: true))
+        }
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .padding(.top, 20)
     }
 
     // MARK: - Stage: review & confirm

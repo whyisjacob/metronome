@@ -9,9 +9,9 @@ import Foundation
 /// fails until it is placed, and (for a Settings control) rendered under its section.
 enum AppControl: String, CaseIterable {
     // Absolute base — the things you touch constantly, kept on the main screen.
-    case tempo              // BPM readout, roll-to-select wheel, ±1 nudges, tap tempo
+    case tempo              // BPM readout, slider, ±1 nudges, tap tempo
     case transport          // Start / Stop
-    case timeSignature      // meter (numerator/denominator, groupings)
+    case timeSignature      // meter — numerator/denominator roll-to-select wheels, groupings
     case subdivision        // quarter / eighth / triplet / sixteenth / 32nd
     case beatVisual         // the on-screen beat indicator
     case sound              // click timbre + Voice mode — reached often, so it lives on the main screen

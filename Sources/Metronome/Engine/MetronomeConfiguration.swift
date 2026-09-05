@@ -11,14 +11,6 @@ struct MetronomeConfiguration: Equatable, Codable {
     /// Swing amount: `0` = straight, `1` = full triplet swing. Clamped to this range.
     static let swingRange: ClosedRange<Double> = 0...1
 
-    /// The discrete BPM values the main-screen tempo roller offers: every integer across `tempoRange`
-    /// inclusively. Derived from `tempoRange` so the wheel's choices and the tempo clamp can never drift
-    /// apart — the roller can only land on a value the engine also accepts, so a selection is never
-    /// silently clamped.
-    static var selectableTempos: [Int] {
-        Array(Int(tempoRange.lowerBound)...Int(tempoRange.upperBound))
-    }
-
     /// Beats (pulses) per minute — quarter notes in a simple meter, **dotted quarters** in a compound
     /// one. Clamped to `tempoRange`.
     var bpm: Double

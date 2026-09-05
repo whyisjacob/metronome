@@ -1,53 +1,62 @@
 import SwiftUI
 
-/// Time-signature editor: an **arbitrary** numerator up to 32 via a stepper (for odd/large meters),
-/// quick-pick chips for common ones, and the denominator as a segmented row {2,4,8,16}.
+/// Time-signature editor as a **roll-to-select** control: a numerator wheel (1–32, so any simple, odd, or
+/// large meter is reachable) beside a denominator wheel (2/4/8/16). Scroll each wheel to dial the meter —
+/// e.g. roll to 4/4, 3/4, 6/8, 7/8. Both wheels' option lists are `TimeSignature`'s own validation
+/// constants (`numeratorRange`, `allowedDenominators`), so a value you can roll to is always a meter the
+/// model accepts and the wheels can never drift out of sync with the engine. Quick accent-grouping presets
+/// for asymmetric meters remain below (they shape the accents, not the meter itself).
 struct MeterControlView: View {
     @ObservedObject var viewModel: MetronomeViewModel
 
-    /// Fast access to common and odd meters; any other numerator (up to 32) is reachable via the stepper.
-    private static let quickNumerators = [2, 3, 4, 5, 6, 7, 9, 11, 13]
+    /// Rolling the numerator wheel installs a new meter (keeping the current denominator); the getter pins
+    /// the wheel to the current numerator, so the wheel and the engine can never disagree.
+    private var numeratorSelection: Binding<Int> {
+        Binding(get: { viewModel.timeSignature.numerator },
+                set: { viewModel.setNumerator($0) })
+    }
+
+    /// Rolling the denominator wheel installs a new meter (keeping the current numerator).
+    private var denominatorSelection: Binding<Int> {
+        Binding(get: { viewModel.timeSignature.denominator },
+                set: { viewModel.setDenominator($0) })
+    }
 
     var body: some View {
         Card("Time signature") {
-            HStack {
-                Text(viewModel.timeSignature.displayString)
+            Text(viewModel.timeSignature.displayString)
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxWidth: .infinity)
+                .accessibilityHidden(true)   // the wheels below carry the accessible values
+
+            // Two roll-to-select wheels: beats-per-bar (1–32) beside the beat unit (2/4/8/16), split by "/".
+            HStack(spacing: 4) {
+                wheel(selection: numeratorSelection,
+                      values: Array(TimeSignature.numeratorRange),
+                      label: "Beats per bar",
+                      value: "\(viewModel.timeSignature.numerator)")
+
+                Text("/")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Stepper(
-                    "Beats per bar",
-                    value: Binding(get: { viewModel.timeSignature.numerator },
-                                   set: { viewModel.setNumerator($0) }),
-                    in: TimeSignature.numeratorRange
-                )
-                .labelsHidden()
-            }
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
 
-            // Quick numerators (odd meters included). Arbitrary values up to 32 stay available via the stepper.
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 46), spacing: 8)], spacing: 8) {
-                ForEach(Self.quickNumerators, id: \.self) { n in
-                    Button(action: { viewModel.setNumerator(n) }) {
-                        Text("\(n)")
-                            .frame(maxWidth: .infinity, minHeight: 40)
-                    }
-                    .buttonStyle(SelectableStyle(isOn: viewModel.timeSignature.numerator == n))
-                }
+                wheel(selection: denominatorSelection,
+                      values: TimeSignature.allowedDenominators,
+                      label: "Beat unit",
+                      value: "\(viewModel.timeSignature.denominator)")
             }
-
-            HStack(spacing: 8) {
-                ForEach(TimeSignature.allowedDenominators, id: \.self) { denom in
-                    Button(action: { viewModel.setDenominator(denom) }) {
-                        Text("\(denom)")
-                            .frame(maxWidth: .infinity, minHeight: 42)
-                    }
-                    .buttonStyle(SelectableStyle(isOn: viewModel.timeSignature.denominator == denom))
-                }
-            }
+            .frame(height: 150)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.stroke))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
 
             // Quick accent groupings for asymmetric meters (e.g. 7/8 as 2+2+3 or 3+2+2). Each sets the
-            // downbeat strong and every subsequent group head to a secondary (medium) accent.
+            // downbeat strong and every subsequent group head to a secondary (medium) accent. These shape
+            // the accents, not the meter, so they stay alongside the wheels.
             if !groupingPresets.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("GROUPING")
@@ -65,6 +74,23 @@ struct MeterControlView: View {
                 }
             }
         }
+    }
+
+    /// One roll-to-select wheel `Picker` over `values`, styled to read as a distinct column inside the card.
+    private func wheel(selection: Binding<Int>, values: [Int], label: String, value: String) -> some View {
+        Picker(label, selection: selection) {
+            ForEach(values, id: \.self) { v in
+                Text("\(v)")
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .tag(v)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.wheel)
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
     }
 
     /// The grouping presets offered for the current (simple, asymmetric) meter, or none. Compound meters

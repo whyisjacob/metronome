@@ -58,4 +58,27 @@ final class SmartImportViewModelTests: XCTestCase {
         XCTAssertEqual(vm.stage, .chooser)
         XCTAssertNil(vm.result)
     }
+
+    /// A photo that can't be loaded at all lands on a *visible* failure stage (not silence), so the UI can
+    /// show an error + retry rather than appearing to do nothing.
+    func testFailedToLoadImageShowsAVisibleErrorStage() {
+        let vm = SmartImportViewModel()
+        vm.failedToLoadImage()
+
+        guard case .failed(let message) = vm.stage else {
+            return XCTFail("expected a visible .failed stage, got \(vm.stage)")
+        }
+        XCTAssertFalse(message.isEmpty, "the failure stage must carry a user-facing message")
+        XCTAssertNil(vm.result)
+    }
+
+    func testRetryFromFailedReturnsToChooser() {
+        let vm = SmartImportViewModel()
+        vm.failedToLoadImage()
+        guard case .failed = vm.stage else { return XCTFail("expected .failed") }
+
+        vm.reset()   // the failure view's "Try again"
+        XCTAssertEqual(vm.stage, .chooser)
+        XCTAssertNil(vm.result)
+    }
 }

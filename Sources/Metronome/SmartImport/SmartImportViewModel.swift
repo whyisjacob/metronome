@@ -12,11 +12,16 @@ import UIKit
 @MainActor
 final class SmartImportViewModel: ObservableObject {
 
-    /// Where the flow is: choosing a source, running OCR, or reviewing the (editable) detection.
+    /// Where the flow is: choosing a source, running OCR, reviewing the (editable) detection, or a visible
+    /// failure (a picked photo that couldn't even be loaded).
     enum Stage: Equatable {
         case chooser
         case processing
         case review
+        /// A picked photo could not be loaded/decoded — shown as a visible error with a retry, so a
+        /// failure is never silent. (A readable-but-empty photo is a normal `.review` with a "found
+        /// nothing" note, not this.)
+        case failed(String)
     }
 
     @Published var stage: Stage = .chooser
@@ -72,6 +77,15 @@ final class SmartImportViewModel: ObservableObject {
     func reset() {
         stage = .chooser
         result = nil
+    }
+
+    /// Surface a **visible** failure when a chosen photo can't be loaded at all (e.g. an undecodable
+    /// asset). This is distinct from a readable-but-empty photo, which stays a normal `.review` with a
+    /// "found nothing" note — here we couldn't even get an image, so the user sees an error and a retry
+    /// instead of nothing happening.
+    func failedToLoadImage() {
+        result = nil
+        stage = .failed("Couldn’t load that photo. Please try another.")
     }
 
     /// The confirmed time signature built from the (possibly edited) review fields. Runs through the
