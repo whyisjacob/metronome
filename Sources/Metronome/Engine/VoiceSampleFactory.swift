@@ -12,9 +12,9 @@ import AVFoundation
 /// identical on every phone, and short/punchy enough that a whole "1 e and a" plays without slurring.
 ///
 /// The clips are generated off-device by `tools/generate_voice_samples.py` with Piper
-/// (voice **en_US-ljspeech-high** — LJ Speech dataset, *public domain*; trained by Bryce Beattie), and
-/// ship as `Resources/Voice/voice_*.wav` (mono 16-bit PCM, 22.05 kHz): `voice_1`…`voice_32` speak the
-/// beat numbers, `voice_and/e/a/trip/let` the subdivision syllables.
+/// (voice **en_US-joe-medium** — OHF-Voice "joe" dataset, **CC0**; a warm, clear male voice fine-tuned from
+/// the natural en_US *lessac* base), and ship as `Resources/Voice/voice_*.wav` (mono 16-bit PCM, 22.05 kHz):
+/// `voice_1`…`voice_32` speak the beat numbers, `voice_and/e/a/trip/let` the subdivision syllables.
 ///
 /// ## How
 ///  1. Each clip is read from the app bundle into an `AVAudioPCMBuffer` (in the file's own format).
@@ -162,7 +162,7 @@ enum VoiceSampleFactory {
     /// still lands exactly on its tick. Returns `[]` for all-silence (⇒ the engine clicks the tick).
     static func compactSyllable(_ samples: [Float],
                                 sampleRate: Double,
-                                maxSeconds: Double = 0.13,
+                                maxSeconds: Double = 0.12,
                                 threshold: Float = 0.03) -> [Float] {
         let trimmed = trimSilence(samples, threshold: threshold)
         guard !trimmed.isEmpty, sampleRate > 0 else { return trimmed }

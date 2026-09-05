@@ -40,17 +40,56 @@ final class RenderPlan {
     @inline(__always)
     var secondsPerTick: Double { sampleRate > 0 ? framesPerTick / sampleRate : 0 }
 
-    /// Shortest subdivision interval (seconds) at which a *spoken* counting syllable is still crisp enough
-    /// to be useful. Below this the engine clicks the subdivisions instead and speaks only the main-beat
-    /// numbers, so a fast tempo (or a fine subdivision) never smears the spoken count into mush.
-    static let minSpokenSubdivisionSeconds = 0.15
+    /// Shortest subdivision interval (seconds) at which a *spoken* counting syllable still finishes before
+    /// the next onset. It sits just above the longest spoken syllable ("and", hard-capped at 0.12 s by
+    /// `VoiceSampleFactory.compactSyllable`), so a syllable scheduled on a tick this long always clears
+    /// before the next tick — below it, that syllable would be hard-cut mid-word, so we click it instead.
+    /// Measured from the bundled clips (see tools/measure_voice.py); 0.12 s syllable + ~0.02 s margin.
+    static let minSpokenSubdivisionSeconds = 0.14
 
-    /// Whether Voice mode should *speak* the subdivision syllables at this tempo, or fall back to clicking
-    /// them. Main beats always speak their number; this governs only the in-between ticks.
-    @inline(__always)
-    var speaksSubdivisionSyllables: Bool {
-        ticksPerBeat <= 1 || secondsPerTick >= Self.minSpokenSubdivisionSeconds
+    /// How much of the count Voice mode *speaks* (vs clicks) at this tempo. The physical reality is that a
+    /// sixteenth grid is 4 tokens/beat and each token has a floor length, so above some tempo they cannot
+    /// all fit — rather than smear, we speak fewer of them as the tick shrinks. Beats ALWAYS speak their
+    /// number; this only governs the in-between ticks.
+    enum VoiceDetail: Equatable {
+        /// Speak every mapped token — sixteenths say the full "1 e and a"; the tick fits a syllable.
+        case full
+        /// SIXTEENTHS only, middle tier: the sixteenth is too short for a token but the EIGHTH still fits,
+        /// so speak the beat number and the "and" (the eighth positions) and CLICK the "e"/"a" → "1 . and .".
+        case eighthsOnly
+        /// Speak only the beat numbers and click every subdivision → "1 . . ." — even the eighth is too short
+        /// (or the subdivision has no spoken syllable, e.g. a tuplet / 32nds).
+        case beatsOnly
     }
+
+    /// The speak-vs-click tier for the CURRENT tempo & subdivision (see `VoiceDetail`). Derived purely from
+    /// the measured minimum spoken interval, so the threshold reflects the real bundled-clip lengths.
+    @inline(__always)
+    var voiceDetail: VoiceDetail {
+        if ticksPerBeat <= 1 { return .full }                                  // no subdivisions to speak
+        if secondsPerTick >= Self.minSpokenSubdivisionSeconds { return .full } // a subdivision syllable fits
+        // A sixteenth grid gets the middle rung: speak the eighth positions if an EIGHTH interval fits.
+        if ticksPerBeat == 4, 2 * secondsPerTick >= Self.minSpokenSubdivisionSeconds { return .eighthsOnly }
+        return .beatsOnly
+    }
+
+    /// Whether the in-beat tick position `pos` *speaks* its token at this tempo (given the degrade tier), or
+    /// clicks instead. Beats (`pos == 0`) always speak their number. One source of truth for both the render
+    /// loop and the next-spoken-onset scan, so the audible schedule and the hard-cut agree exactly.
+    @inline(__always)
+    func speaksSubdivision(atPosInBeat pos: Int) -> Bool {
+        guard pos != 0 else { return true }                       // the beat: always speaks its number
+        switch voiceDetail {
+        case .full:        return true
+        case .eighthsOnly: return ticksPerBeat == 4 && pos == 2   // only the "and" (the eighth) speaks
+        case .beatsOnly:   return false
+        }
+    }
+
+    /// Whether Voice mode speaks *all* the subdivision syllables at this tempo (the `.full` tier). Main beats
+    /// always speak their number regardless; this is only the top rung of the degrade ladder.
+    @inline(__always)
+    var speaksSubdivisionSyllables: Bool { voiceDetail == .full }
 
     /// The gap-click trainer's decision for tick `n` (a global tick index from playback start): whether to
     /// sound it, silence it, or keep only a soft downbeat. Returns `.play` when the trainer is disabled,

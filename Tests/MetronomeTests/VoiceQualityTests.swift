@@ -55,6 +55,45 @@ final class VoiceQualityTests: XCTestCase {
         XCTAssertFalse(plan(240, .sixteenth).speaksSubdivisionSyllables) // ~0.063 s/tick
     }
 
+    /// The three-tier fast-tempo degrade for the sixteenth count ("1 e and a"). The physical limit is that
+    /// four tokens/beat each have a floor length, so above some tempo they cannot all fit — we speak fewer
+    /// rather than smear. This pins the tempos at which the tiers switch, from the measured token lengths.
+    func testVoiceDetailDegradeTiers() {
+        func detail(_ bpm: Double, _ sub: Subdivision) -> RenderPlan.VoiceDetail {
+            RenderPlan(config: MetronomeConfiguration(bpm: bpm, timeSignature: .common, subdivision: sub),
+                       sampleRate: sampleRate).voiceDetail
+        }
+        // Sixteenths: full "1 e and a" while the sixteenth interval fits a syllable (≥ 0.14 s)…
+        XCTAssertEqual(detail(80, .sixteenth), .full)          // 0.1875 s/16th
+        XCTAssertEqual(detail(100, .sixteenth), .full)         // 0.15 s/16th
+        // …drop the "e"/"a" to clicks (speak "1 . and .") once the sixteenth no longer fits but the eighth does…
+        XCTAssertEqual(detail(120, .sixteenth), .eighthsOnly)  // 0.125 s/16th, 0.25 s/8th
+        XCTAssertEqual(detail(180, .sixteenth), .eighthsOnly)  // 0.083 s/16th, 0.167 s/8th
+        // …and finally beats-only when even the eighth is too short.
+        XCTAssertEqual(detail(240, .sixteenth), .beatsOnly)    // 0.063 s/16th, 0.125 s/8th < 0.14
+        // Eighths and triplets have no middle tier: full while they fit, else beats-only.
+        XCTAssertEqual(detail(120, .eighth), .full)            // 0.25 s/tick
+        XCTAssertEqual(detail(240, .eighth), .beatsOnly)       // 0.125 s/tick < 0.14
+        XCTAssertEqual(detail(120, .triplet), .full)           // 0.167 s/tick
+        XCTAssertEqual(detail(200, .triplet), .beatsOnly)      // 0.10 s/tick < 0.14
+        // Quarters never subdivide → always full (the flag is irrelevant there).
+        XCTAssertEqual(detail(240, .quarter), .full)
+    }
+
+    /// In the middle (`.eighthsOnly`) tier the engine speaks the beat number and the "and" (the eighth
+    /// positions) and clicks the "e"/"a" — so the beat number gets a whole eighth before the next spoken
+    /// token instead of a single sixteenth, which is what stops it from being chopped mid-word.
+    func testEighthsOnlyTierSpeaksBeatAndAndClicksEandA() {
+        let p = RenderPlan(config: MetronomeConfiguration(bpm: 150, timeSignature: .common,
+                                                          subdivision: .sixteenth),
+                           sampleRate: sampleRate)
+        XCTAssertEqual(p.voiceDetail, .eighthsOnly)          // 0.10 s/16th, 0.20 s/8th
+        XCTAssertTrue(p.speaksSubdivision(atPosInBeat: 0))   // the beat number — always spoken
+        XCTAssertFalse(p.speaksSubdivision(atPosInBeat: 1))  // "e"  → click
+        XCTAssertTrue(p.speaksSubdivision(atPosInBeat: 2))   // "and" → spoken
+        XCTAssertFalse(p.speaksSubdivision(atPosInBeat: 3))  // "a"  → click
+    }
+
     /// End-to-end: in Voice mode at a fast sixteenth tempo, the subdivisions can't be spoken — but a
     /// sound (a click) must still land on every subdivision tick so the count is never lost. Whether a
     /// tick sounds spoken or clicked, the onset is on the same sample-accurate grid.

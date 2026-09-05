@@ -254,6 +254,23 @@ final class MetronomeEngine {
         control.withLock { $0.speakSubdivisions = on }
     }
 
+    /// Test-only seam: publish synthetic spoken-number / syllable buffers so a headless test can exercise
+    /// the REAL Voice render path — the hard-cut between successive counts and the fast-tempo degrade —
+    /// without the app's bundled `.wav` resources, which a logic-test bundle does not carry (there the
+    /// loader returns `[]` and the engine clicks, so the spoken schedule would otherwise never run in CI).
+    /// Marks the rate as already rendered so the lazy background render is a no-op and cannot clobber the
+    /// injected tables. Not called by the app.
+    func installSyntheticVoiceTablesForTesting(numbers: [[Float]],
+                                               syllables: [[Float]],
+                                               sampleRate: Double) {
+        control.withLock {
+            $0.voiceTable = numbers
+            $0.voiceSyllableTable = syllables
+            $0.voiceRate = sampleRate
+            $0.voiceRenderingRate = 0
+        }
+    }
+
     // MARK: - Real-time transport
 
     /// Starts (or restarts) the single-tempo click from tick 0. Clears any song plan so the two modes
@@ -651,12 +668,16 @@ final class MetronomeEngine {
                                          into: ablPtr, frameCount: frames, cutVoices: false)
                         } else if atVoiceMode {
                             // Voice mode: speak the number/syllable for this tick exactly on its frame,
-                            // cutting any still-sounding previous spoken token. At a tempo where a spoken
-                            // subdivision can't fit, speak only the main beats and click the subdivisions
-                            // (fast-tempo fallback) so the count is never lost; unmapped ticks click too.
+                            // cutting any still-sounding previous spoken token. As the tempo rises the count
+                            // gracefully degrades (RenderPlan.voiceDetail): a sixteenth "1 e and a" first
+                            // drops the "e"/"a" to clicks (speak "1 . and ."), then drops to beat-numbers-only
+                            // — so a spoken token is never hard-cut mid-word and the count is never lost. The
+                            // user's "beats only" preference and unmapped ticks (tuplets/32nds) click too.
                             var token = plan.voiceToken(forTick: tick)
                             if case .syllable = token,
-                               !atSpeakSubdivisions || !plan.speaksSubdivisionSyllables { token = .none }
+                               !atSpeakSubdivisions || !plan.speaksSubdivision(atPosInBeat: tick % plan.ticksPerBeat) {
+                                token = .none
+                            }
                             scheduleVoiceToken(token, level: level, at: offset,
                                                into: ablPtr, frameCount: frames)
                         } else {
@@ -786,7 +807,7 @@ final class MetronomeEngine {
                 if level != .muted && gate == .play {
                     if tick % tpb == 0 {
                         return onset - blockStart                       // a beat: speaks its number
-                    } else if atSpeakSubdivisions && plan.speaksSubdivisionSyllables,
+                    } else if atSpeakSubdivisions && plan.speaksSubdivision(atPosInBeat: tick % tpb),
                               case .syllable = plan.voiceToken(forTick: tick) {
                         return onset - blockStart                       // a spoken subdivision syllable
                     }

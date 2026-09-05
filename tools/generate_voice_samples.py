@@ -8,24 +8,38 @@ Instead we pre-generate short, trimmed, normalized clips here — once, off-devi
 bundle them as app resources (see Sources/Metronome/Engine/VoiceSampleFactory.swift, which
 loads them at Voice-mode init and schedules them sample-accurately, exactly like a click).
 
-Voice: en_US-ljspeech-high (Piper).
-  * Dataset:  LJ Speech (https://keithito.com/LJ-Speech-Dataset/) — PUBLIC DOMAIN.
-  * Training: Bryce Beattie (https://brycebeattie.com/files/tts/).
-  * License:  public domain — commercial redistribution of the generated audio is allowed;
-              no attribution is legally required (we credit it anyway in the app's About).
+## Voice: en_US-joe (Piper), CC0 / public-domain-equivalent
+  * Dataset:  OHF-Voice "joe" (https://github.com/OHF-Voice/voice-datasets) — **CC0 1.0**
+              (public-domain dedication; commercial redistribution of the generated audio is
+              allowed, no attribution legally required — we credit it anyway in the app's About).
+  * Model:    en_US-joe-medium, fine-tuned from the U.S. English *lessac* Piper voice, which is
+              one of Piper's most natural-sounding en_US bases. A warm, clear MALE counting voice.
+  * Why joe over the previous en_US-ljspeech-high: joe is licensed CC0 (cleaner than LJ Speech's
+              "public domain" claim) and synthesises the *multi-syllable* numbers noticeably tighter
+              and more evenly (e.g. "seventeen" ~0.53 s vs ~0.72 s), which is what let those tokens
+              smear on fast sixteenths. See tools/measure_voice.py for the measured comparison.
+
+## Why Kokoro (the more-natural Apache-2.0 TTS) is not used here
+  Kokoro's English G2P (`misaki`, via spaCy/thinc) and current `kokoro-onnx` both require
+  Python >= 3.10 / onnxruntime >= 1.20, neither of which installs on this repo's authoring
+  machine (Windows, system Python 3.9 → onnxruntime caps at 1.19.2). Piper (joe, CC0) is the
+  best permissive voice that builds cleanly here. Re-evaluate Kokoro on a Python 3.11+ box.
 
 Usage (Windows, Python 3.9+):
     pip install piper-tts
-    # download en_US-ljspeech-high.onnx (+ .onnx.json) from
-    #   https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/ljspeech/high
-    python tools/generate_voice_samples.py --model C:/path/to/en_US-ljspeech-high.onnx
+    # download en_US-joe-medium.onnx (+ .onnx.json) from
+    #   https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/joe/medium
+    python tools/generate_voice_samples.py --model C:/path/to/en_US-joe-medium.onnx
 
 Outputs 37 mono 16-bit PCM WAVs at 22.05 kHz to Resources/Voice/:
     voice_1.wav … voice_32.wav   (spoken "one" … "thirty-two"; beat numbers)
     voice_and.wav voice_e.wav voice_a.wav voice_trip.wav voice_let.wav   (subdivision syllables)
 
-The clips are deliberately short and punchy. The Swift side additionally trims to the
-onset and hard-caps syllable length, so timing never depends on the synthesizer.
+The clips are deliberately short and punchy (numbers at length_scale 0.82, syllables at 0.80).
+The Swift side additionally trims to the onset, hard-caps syllable length, and — the real fix for
+fast subdivisions — HARD-CUTS the previous token at the next onset and gracefully degrades how many
+tokens it speaks as the tempo rises (see RenderPlan.voiceDetail / MetronomeEngine), so timing never
+depends on the synthesizer and a fast "1 e and a" never smears.
 """
 
 import argparse
@@ -37,6 +51,17 @@ import numpy as np
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(REPO_ROOT, "Resources", "Voice")
+
+# Permissive Piper voices we can ship (commercial redistribution of the generated audio allowed).
+# `joe` is the default (CC0 + lessac-derived); `ljspeech` is kept as a known-good fallback.
+VOICES = {
+    "joe": dict(model="en_US-joe-medium.onnx",
+                dataset="OHF-Voice joe (fine-tuned from en_US-lessac)",
+                license="CC0 1.0 (public-domain dedication)"),
+    "ljspeech": dict(model="en_US-ljspeech-high.onnx",
+                     dataset="LJ Speech",
+                     license="public domain"),
+}
 
 # Beat numbers 1..32 (TimeSignature.numeratorRange.upperBound == 32). Filename is the
 # numeral (voice_<n>.wav); the *audio* speaks the English word.
@@ -87,7 +112,7 @@ def synth(voice, text, length_scale):
     return audio, rate
 
 
-def process(x, rate, peak=0.9, trim_thresh=0.008):
+def process(x, rate, peak=0.9, trim_thresh=0.01):
     """Trim outer silence, normalize to `peak`, and apply short anti-click fades.
 
     Kept intentionally light: the Swift loader re-trims to the onset (so the token lands
@@ -121,19 +146,27 @@ def write_wav(path, x, rate):
 
 def main():
     ap = argparse.ArgumentParser()
-    default_model = os.path.join(os.environ.get("TEMP", "/tmp"),
-                                 "piper-voice", "en_US-ljspeech-high.onnx")
-    ap.add_argument("--model", default=default_model,
-                    help="Path to the Piper .onnx model (config .onnx.json must sit beside it).")
-    ap.add_argument("--number-length-scale", type=float, default=1.0)
-    ap.add_argument("--syllable-length-scale", type=float, default=0.85)
+    ap.add_argument("--voice", choices=sorted(VOICES), default="joe",
+                    help="Which permissive Piper voice to render (default: joe, CC0).")
+    default_dir = os.path.join(os.environ.get("TEMP", "/tmp"), "piper-voice")
+    ap.add_argument("--model", default=None,
+                    help="Path to the Piper .onnx model (config .onnx.json must sit beside it). "
+                         "Defaults to <TEMP>/piper-voice/<voice model>.")
+    ap.add_argument("--number-length-scale", type=float, default=0.82)
+    ap.add_argument("--syllable-length-scale", type=float, default=0.80)
     args = ap.parse_args()
 
-    if not os.path.isfile(args.model):
-        sys.exit(f"model not found: {args.model}")
+    meta = VOICES[args.voice]
+    model = args.model or os.path.join(default_dir, meta["model"])
+    if not os.path.isfile(model):
+        sys.exit(f"model not found: {model}")
+
+    print(f"Voice:   {args.voice}  ({meta['model']})")
+    print(f"Dataset: {meta['dataset']}")
+    print(f"License: {meta['license']}\n")
 
     from piper import PiperVoice
-    voice = PiperVoice.load(args.model)
+    voice = PiperVoice.load(model)
 
     os.makedirs(OUT_DIR, exist_ok=True)
     summary = []

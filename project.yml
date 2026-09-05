@@ -50,7 +50,7 @@ targets:
       # copied into the app bundle and found at runtime via Bundle.main.url(forResource:withExtension:).
       # Kept OUTSIDE Sources/Metronome so the recursive source glob above does not also add them (a second
       # reference would be a duplicate build file). Generated off-device by tools/generate_voice_samples.py
-      # (Piper, voice en_US-ljspeech-high — LJ Speech dataset, public domain; trained by Bryce Beattie).
+      # (Piper, voice en_US-joe-medium — OHF-Voice "joe" dataset, CC0; a male voice fine-tuned from lessac).
       - path: Resources/Voice
         buildPhase: resources
     # XcodeGen writes (and auto-excludes from the copy phase) this Info.plist from the
