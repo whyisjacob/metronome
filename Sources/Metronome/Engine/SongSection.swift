@@ -48,6 +48,20 @@ struct SongSection: Identifiable, Equatable, Codable {
     /// and re-clamped automatically whenever this section's meter/subdivision change — because those change
     /// `ticksPerBar` and the section is rebuilt through this initializer. Reuses the proven `Pickup` model.
     var pickupTicks: Int
+    /// Whether this section's `pickupTicks` lead-in plays when you START on or SEEK/jump to this section (the
+    /// user's "start on section with/without a pickup" choice). Default `true`; moot when `pickupTicks == 0`.
+    /// A pickup is a one-time lead-in either way — it is NEVER replayed on a continuous pass through the
+    /// section. Tolerated-if-missing so an older file decodes as `true`.
+    var startWithPickup: Bool
+    /// Per-section override of the song's global Voice ("count out loud") setting: `nil` = INHERIT the
+    /// song-level default (`Song.voiceEnabled`), `true`/`false` = force this section on/off. Song counting
+    /// otherwise reuses the SAME machinery as the single-tempo path. Tolerated-if-missing decodes as `nil`.
+    var voiceEnabled: Bool?
+    /// Per-section override of the global "speak the in-between subdivisions" Voice option: `nil` = INHERIT
+    /// the app-level preference, else force. Only meaningful while Voice is on for the section. The counted
+    /// subdivision itself is this section's own `subdivision` (edited with the shared subdivision control).
+    /// Tolerated-if-missing decodes as `nil`.
+    var speakSubdivisions: Bool?
 
     init(id: UUID = UUID(),
          name: String = "Section",
@@ -59,7 +73,10 @@ struct SongSection: Identifiable, Equatable, Codable {
          repeatCount: Int = 1,
          swing: Double = 0,
          cell: RhythmCell = .straight,
-         pickupTicks: Int = 0) {
+         pickupTicks: Int = 0,
+         startWithPickup: Bool = true,
+         voiceEnabled: Bool? = nil,
+         speakSubdivisions: Bool? = nil) {
         self.id = id
         self.name = name
         self.tempoBPM = tempoBPM.clamped(to: MetronomeConfiguration.tempoRange)
@@ -69,6 +86,9 @@ struct SongSection: Identifiable, Equatable, Codable {
         self.repeatCount = repeatCount.clamped(to: SongSection.repeatRange)
         self.swing = swing.clamped(to: MetronomeConfiguration.swingRange)
         self.cell = cell
+        self.startWithPickup = startWithPickup
+        self.voiceEnabled = voiceEnabled
+        self.speakSubdivisions = speakSubdivisions
         // Clamp the pickup to this section's grid (0 … ticksPerBar−1) via the proven `Pickup` rule. Computed
         // from the LOCAL params (not `self`, which isn't fully initialized yet); re-runs on every rebuild, so
         // a meter/subdivision change that shrinks the bar re-clamps a now-too-long pickup automatically.
@@ -86,7 +106,7 @@ struct SongSection: Identifiable, Equatable, Codable {
     // still load — as straight, with no pickup.
     enum CodingKeys: String, CodingKey {
         case id, name, tempoBPM, timeSignature, subdivision, accentPattern, bars, repeatCount, swing, cell
-        case pickupTicks
+        case pickupTicks, startWithPickup, voiceEnabled, speakSubdivisions
     }
 
     init(from decoder: Decoder) throws {
@@ -104,9 +124,15 @@ struct SongSection: Identifiable, Equatable, Codable {
         // Default 0 (no pickup) when the key is absent — a song saved/exported before this field decodes
         // exactly as it always did. The init re-clamps it to this section's grid regardless.
         let pickupTicks = try c.decodeIfPresent(Int.self, forKey: .pickupTicks) ?? 0
+        // Default true / nil (inherit) when absent — a song saved before these Voice/pickup-choice fields
+        // decodes exactly as it always did (pickup lead-in on by default, voice inheriting the song global).
+        let startWithPickup = try c.decodeIfPresent(Bool.self, forKey: .startWithPickup) ?? true
+        let voiceEnabled = try c.decodeIfPresent(Bool.self, forKey: .voiceEnabled)
+        let speakSubdivisions = try c.decodeIfPresent(Bool.self, forKey: .speakSubdivisions)
         self.init(id: id, name: name, tempoBPM: bpm, timeSignature: ts, subdivision: sub,
                   accentPattern: accents, bars: bars, repeatCount: repeatCount, swing: swing, cell: cell,
-                  pickupTicks: pickupTicks)
+                  pickupTicks: pickupTicks, startWithPickup: startWithPickup,
+                  voiceEnabled: voiceEnabled, speakSubdivisions: speakSubdivisions)
     }
 
     // MARK: - Derived timing (mirrors MetronomeConfiguration for a single section)

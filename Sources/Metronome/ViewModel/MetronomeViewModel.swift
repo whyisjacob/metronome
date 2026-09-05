@@ -269,7 +269,9 @@ final class MetronomeViewModel: ObservableObject {
         if isPlaying {
             let section = currentSectionIndex ?? 0
             do { try engine.startSong(song.playbackScaled()) } catch { }
-            engine.seekSong(toSection: section)   // rebuild scaled, return to where we were
+            // A transparent rebuild to apply the new scale — return to where we were WITHOUT replaying the
+            // section's pickup (that lead-in is for a deliberate start/jump, not a tempo tweak).
+            engine.seekSong(toSection: section, playPickup: false)
             songPaused = false
             setPlaying(true)
         }

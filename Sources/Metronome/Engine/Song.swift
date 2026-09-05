@@ -23,17 +23,22 @@ struct Song: Identifiable, Equatable, Codable {
     /// floored at 0 here and re-clamped to the first section's grid at playback via `Pickup.effectiveTicks`.
     /// Persisted with the song; tolerated-if-missing so pre-pickup songs decode unchanged.
     var pickupTicks: Int
+    /// The song's GLOBAL Voice ("count out loud") default. Each `SongSection` inherits this unless it sets
+    /// its own `voiceEnabled` override. Default `false` (songs are silent-click by default, exactly as
+    /// before). Persisted; tolerated-if-missing so a pre-voice song decodes as `false`.
+    var voiceEnabled: Bool
 
     init(id: UUID = UUID(), name: String = "Untitled Song", sections: [SongSection] = [],
-         tempoScale: Double = 1.0, pickupTicks: Int = 0) {
+         tempoScale: Double = 1.0, pickupTicks: Int = 0, voiceEnabled: Bool = false) {
         self.id = id
         self.name = name
         self.sections = sections
         self.tempoScale = tempoScale.clamped(to: Song.tempoScaleRange)
         self.pickupTicks = max(0, pickupTicks)
+        self.voiceEnabled = voiceEnabled
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, sections, tempoScale, pickupTicks }
+    enum CodingKeys: String, CodingKey { case id, name, sections, tempoScale, pickupTicks, voiceEnabled }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -45,6 +50,8 @@ struct Song: Identifiable, Equatable, Codable {
             .clamped(to: Song.tempoScaleRange)
         // Default 0 (no pickup) when absent — a song saved/exported before this field decodes as before.
         self.pickupTicks = max(0, try c.decodeIfPresent(Int.self, forKey: .pickupTicks) ?? 0)
+        // Default false (silent-click song) when absent — a pre-voice song decodes exactly as before.
+        self.voiceEnabled = try c.decodeIfPresent(Bool.self, forKey: .voiceEnabled) ?? false
     }
 
     /// Total bars across every section (each section's bars × repeats).
@@ -75,8 +82,11 @@ struct Song: Identifiable, Equatable, Codable {
             SongSection(id: s.id, name: s.name, tempoBPM: (s.tempoBPM * tempoScale).rounded(),
                         timeSignature: s.timeSignature, subdivision: s.subdivision,
                         accentPattern: s.accentPattern, bars: s.bars, repeatCount: s.repeatCount,
-                        swing: s.swing, cell: s.cell, pickupTicks: s.pickupTicks)
+                        swing: s.swing, cell: s.cell, pickupTicks: s.pickupTicks,
+                        startWithPickup: s.startWithPickup, voiceEnabled: s.voiceEnabled,
+                        speakSubdivisions: s.speakSubdivisions)
         }
-        return Song(id: id, name: name, sections: scaled, tempoScale: 1.0, pickupTicks: pickupTicks)
+        return Song(id: id, name: name, sections: scaled, tempoScale: 1.0, pickupTicks: pickupTicks,
+                    voiceEnabled: voiceEnabled)
     }
 }

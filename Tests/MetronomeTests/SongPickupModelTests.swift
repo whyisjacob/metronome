@@ -144,6 +144,7 @@ final class SongPickupModelTests: XCTestCase {
         let song = try JSONDecoder().decode(Song.self, from: json)
         XCTAssertEqual(song.name, "Old Song")
         XCTAssertEqual(song.pickupTicks, 0)
+        XCTAssertEqual(song.voiceEnabled, false)   // pre-voice default (song-global Voice off)
         XCTAssertEqual(song.sections.count, 1)
         let s = song.sections[0]
         XCTAssertEqual(s.name, "A")
@@ -153,6 +154,9 @@ final class SongPickupModelTests: XCTestCase {
         XCTAssertEqual(s.pickupTicks, 0)      // defaulted, not required in the old file
         XCTAssertEqual(s.swing, 0)            // pre-groove default
         XCTAssertEqual(s.cell, .straight)     // pre-cell default
+        XCTAssertEqual(s.startWithPickup, true)    // pre-field default: a pickup would lead in when started
+        XCTAssertNil(s.voiceEnabled)               // pre-field default: inherit the song global
+        XCTAssertNil(s.speakSubdivisions)          // pre-field default: inherit the app global
     }
 
     /// The same guarantee through the SHARED `.maelzelsong` path: an exported file written before the pickup

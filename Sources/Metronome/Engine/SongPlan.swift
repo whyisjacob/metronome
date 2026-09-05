@@ -39,6 +39,16 @@ final class SongPlan {
     private let barIndices: [Int]
     /// Beat-within-bar (0-based) for a beat click, or `-1` for a between-beats subdivision click.
     private let beatIndices: [Int]
+    /// The Voice token for each click (empty when the plan carries no voice). Computed per section from the
+    /// SAME `RenderPlan.voiceToken` the single-tempo path uses, so song counting can never disagree with it.
+    private let voiceTokens: [VoiceToken]
+    /// Whether each click SPEAKS its token (vs clicks) when its section's Voice is on — a beat number always
+    /// speaks; a subdivision syllable speaks only when its section speaks subdivisions AND the tempo allows
+    /// (the same `RenderPlan` degrade as single-tempo). Empty when the plan carries no voice.
+    private let speaksTokens: [Bool]
+    /// The resolved per-section Voice / counting settings (`nil` = no voice: every section clicks, exactly
+    /// as before). Kept so the engine and the seek path can ask "does section s count out loud?".
+    let voice: SongVoicePlan?
 
     /// Absolute integer sample frame at which each section begins (`sectionStartFrames[s]`), plus a
     /// final entry equal to `totalFrames`. Independent-of-callback bookkeeping, handy for tests/UI.
@@ -48,8 +58,9 @@ final class SongPlan {
     /// Whole length of the song in samples — the sum of every section's rounded integer length.
     let totalFrames: Int
 
-    init(song: Song, sampleRate: Double) {
+    init(song: Song, sampleRate: Double, voice: SongVoicePlan? = nil) {
         self.sampleRate = sampleRate
+        self.voice = voice
 
         var frames: [Int] = []
         var accents: [AccentLevel] = []
@@ -58,6 +69,10 @@ final class SongPlan {
         var beatIndices: [Int] = []
         var starts: [Int] = []
         var counts: [Int] = []
+        // Voice tokens are built ONLY when a voice plan is supplied — otherwise these stay empty and the
+        // render path is byte-for-byte the classic-click song (the accuracy oracle uses the no-voice path).
+        var voiceTokens: [VoiceToken] = []
+        var speaksTokens: [Bool] = []
 
         // Rough reserve to avoid repeated growth for large songs.
         let estimate = song.sections.reduce(0) { $0 + $1.totalTicks }
@@ -66,6 +81,7 @@ final class SongPlan {
         sectionIndices.reserveCapacity(estimate)
         barIndices.reserveCapacity(estimate)
         beatIndices.reserveCapacity(estimate)
+        if voice != nil { voiceTokens.reserveCapacity(estimate); speaksTokens.reserveCapacity(estimate) }
 
         var cursor = 0
         for (s, section) in song.sections.enumerated() {
@@ -80,6 +96,13 @@ final class SongPlan {
 
             let swing = section.swing
             let cell = section.cell
+            // A throwaway single-tempo plan for THIS section's grid, consulted only for Voice tokens — it
+            // reuses the audited `voiceToken`/`speaksSubdivision` code, so song counting is identical to the
+            // single-tempo count for the same meter/subdivision/tempo. Built once per section (off the audio
+            // thread) and only when the plan carries voice.
+            let voicePlan: RenderPlan? = voice != nil
+                ? RenderPlan(config: section.configuration, sampleRate: sampleRate) : nil
+            let sectionSpeaksSubs = voice?.speakSubdivisions(section: s) ?? false
             for i in 0..<totalTicks {
                 // Closed form from the integer cursor: no per-tick accumulation → no intra-section drift.
                 // Swing rides the SAME `SwingGrid` the single-tempo path uses; at `swing == 0` it is
@@ -105,6 +128,20 @@ final class SongPlan {
                 }
                 sectionIndices.append(s)
                 barIndices.append(i / ticksPerBar)
+
+                // Voice tokens (only when the plan carries voice). The token is what to SAY on this click;
+                // `speaks` folds the section's speak-subdivisions preference and the tempo degrade, so the
+                // engine just reads the two arrays. Onset frames/accents above are untouched — Voice changes
+                // WHAT sounds, never WHEN — so the accuracy oracle (no-voice path) is byte-for-byte intact.
+                if let vp = voicePlan {
+                    let token = vp.voiceToken(forTick: i)
+                    voiceTokens.append(token)
+                    switch token {
+                    case .number:   speaksTokens.append(true)                 // a beat number always speaks
+                    case .syllable: speaksTokens.append(sectionSpeaksSubs && vp.speaksSubdivision(forTick: i))
+                    case .none:     speaksTokens.append(false)                // 32nd/tuplet -> click
+                    }
+                }
             }
 
             counts.append(totalTicks)
@@ -118,6 +155,8 @@ final class SongPlan {
         self.sectionIndices = sectionIndices
         self.barIndices = barIndices
         self.beatIndices = beatIndices
+        self.voiceTokens = voiceTokens
+        self.speaksTokens = speaksTokens
         self.sectionStartFrames = starts
         self.sectionClickCounts = counts
         self.totalFrames = cursor
@@ -146,5 +185,20 @@ final class SongPlan {
     @inline(__always) func beatInBar(at i: Int) -> Int? {
         let b = beatIndices[i]
         return b >= 0 ? b : nil
+    }
+
+    // MARK: - Voice (song counting) — all safe when the plan carries no voice (return "off" / click)
+
+    /// Whether section `s` counts out loud (its resolved Voice setting). `false` when the plan has no voice.
+    @inline(__always) func voiceEnabled(section s: Int) -> Bool { voice?.voiceEnabled(section: s) ?? false }
+    /// Whether the click at flat index `i` is in a section that counts out loud.
+    @inline(__always) func voiceEnabled(at i: Int) -> Bool { voiceEnabled(section: sectionIndices[i]) }
+    /// The Voice token to utter on click `i` (`.none` when the plan has no voice → the engine clicks).
+    @inline(__always) func voiceToken(at i: Int) -> VoiceToken {
+        voiceTokens.indices.contains(i) ? voiceTokens[i] : .none
+    }
+    /// Whether click `i` SPEAKS its token (vs clicks) when its section's Voice is on. `false` without voice.
+    @inline(__always) func speaksToken(at i: Int) -> Bool {
+        speaksTokens.indices.contains(i) ? speaksTokens[i] : false
     }
 }

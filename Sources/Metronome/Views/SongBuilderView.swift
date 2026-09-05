@@ -15,11 +15,20 @@ struct SongBuilderView: View {
     /// The section as it was when its editor opened, so Cancel can restore it after live-committed edits
     /// (P2.6). Nil when no section editor is open.
     @State private var preEditSnapshot: SongSection?
+    /// A throwaway model backing the SONG-level count-in, seeded from the first section's grid + the song
+    /// pickup, so the shared `CountInControlView` edits the song pickup in the right ticks. Never played;
+    /// re-seeded when the first section's grid changes, and the engine re-clamps defensively at playback.
+    @StateObject private var songPickupVM: MetronomeViewModel
 
     init(song: Song, store: SongStore, metronome: MetronomeViewModel) {
         self.store = store
         self.metronome = metronome
         _song = State(initialValue: song)
+        _songPickupVM = StateObject(wrappedValue: {
+            let vm = MetronomeViewModel(config: song.sections.first?.configuration ?? MetronomeConfiguration())
+            vm.setPickupTicks(song.pickupTicks)
+            return vm
+        }())
     }
 
     var body: some View {
@@ -30,6 +39,7 @@ struct SongBuilderView: View {
                     VStack(spacing: 16) {
                         nameCard
                         sectionsCard
+                        songSettingsCard
                         playButton
                     }
                     .padding(.horizontal, 18)
@@ -56,6 +66,8 @@ struct SongBuilderView: View {
             .sheet(item: $editingSection) { section in
                 SongSectionEditorView(
                     section: section,
+                    songVoiceEnabled: song.voiceEnabled,
+                    globalSpeakSubdivisions: metronome.speakSubdivisions,
                     onCommit: { updated in song = song.replacingSection(updated) },  // live → autosaves (P2.6)
                     onCancel: { if let snap = preEditSnapshot { song = song.replacingSection(snap) } }
                 )
@@ -116,6 +128,49 @@ struct SongBuilderView: View {
         }
     }
 
+    // MARK: - Song-level count-in + Voice (the global each section inherits)
+
+    private var songSettingsCard: some View {
+        Card("Song count-in & voice") {
+            if let first = song.sections.first {
+                // The SAME shared count-in control as the section editor / main screen, in the first
+                // section's grid — no parallel implementation.
+                CountInControlView(viewModel: songPickupVM)
+                Text("Plays once before the song's first downbeat, in \(first.name)'s grid. It is a one-time lead-in, never replayed on later passes.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider().padding(.vertical, 4)
+
+                Toggle(isOn: $song.voiceEnabled) {
+                    Text("Count out loud (Voice)")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                .tint(Theme.accentNormal)
+                Text("The song's global Voice setting: every section counts aloud unless it overrides this in its editor. Each section's own subdivision is the counted subdivision.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Add a section to set a song count-in and Voice.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+        // Mirror the shared control's edits back onto the song, and re-seed the control's grid when the
+        // first section's meter/subdivision change (the engine also re-clamps defensively at playback).
+        .onChange(of: songPickupVM.pickupTicks) { _, ticks in
+            if song.pickupTicks != ticks { song.pickupTicks = ticks }
+        }
+        .onChange(of: song.sections.first?.ticksPerBar ?? 0) { _, _ in
+            songPickupVM.load(song.sections.first?.configuration ?? MetronomeConfiguration())
+            songPickupVM.setPickupTicks(songPickupVM.pickupTicks)   // re-clamp the stored value to the new grid
+            if song.pickupTicks != songPickupVM.pickupTicks { song.pickupTicks = songPickupVM.pickupTicks }
+        }
+    }
+
     private var playButton: some View {
         Button(action: play) {
             Label("Play song", systemImage: "play.fill")
@@ -157,7 +212,9 @@ struct SongBuilderView: View {
         copy = SongSection(id: UUID(), name: copy.name + " copy", tempoBPM: copy.tempoBPM,
                            timeSignature: copy.timeSignature, subdivision: copy.subdivision,
                            accentPattern: copy.accentPattern, bars: copy.bars, repeatCount: copy.repeatCount,
-                           swing: copy.swing, cell: copy.cell, pickupTicks: copy.pickupTicks)
+                           swing: copy.swing, cell: copy.cell, pickupTicks: copy.pickupTicks,
+                           startWithPickup: copy.startWithPickup, voiceEnabled: copy.voiceEnabled,
+                           speakSubdivisions: copy.speakSubdivisions)
         song.sections.insert(copy, at: index + 1)
     }
 

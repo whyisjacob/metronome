@@ -58,11 +58,16 @@ final class MetronomeEngine {
         /// callback re-anchors `framesElapsed`/`nextClickIndex` to it so a section restart/skip is
         /// sample-accurate and never rebuilds the plan. Only used in song mode.
         var songSeekClickIndex: Int?
+        /// Song-mode one-time pickup lead-in to play before the next start/seek target (nil = none). Consumed
+        /// once by the render callback (like `songSeekClickIndex`) — it is NEVER part of `songPlan`, so a
+        /// continuous pass through a section can never replay its pickup.
+        var songPreroll: SongPreroll?
         /// Sound buffers, published under this lock so a live sound change is race-free. All three are
         /// `[[Float]]` (indexed by accent level, or by beat for `voiceTable`) — COW value types, so the
         /// audio thread snapshots them with a cheap retain, never an allocation.
         var clickTable: [[Float]] = []      // the selected click timbre (single-tempo mode)
         var pickupTable: [[Float]] = []     // the selected timbre, pitch-shifted — the distinct pickup tone
+        var classicPickupTable: [[Float]] = [] // the CLASSIC click pitch-shifted — song-mode pickup tone (stable)
         var voiceTable: [[Float]] = []      // spoken numbers, indexed by beat (0 == "one"); may be empty
         var voiceSyllableTable: [[Float]] = [] // spoken subdivision syllables, indexed by VoiceSyllable.rawValue
         var classicTable: [[Float]] = []    // always the classic click — song mode & fallback
@@ -133,6 +138,11 @@ final class MetronomeEngine {
         var nextClickIndex = 0
         /// One-shot guard so the end-of-song pulse is published exactly once.
         var songFinishedPublished = false
+        /// The song-mode pickup lead-in currently sounding (empty when none), and the next pickup click to
+        /// consider. Loaded once from `Control.songPreroll` on a start/seek and drained before the main
+        /// stream; cleared when exhausted, so it plays exactly once.
+        var prerollClicks: [SongPreroll.Click] = []
+        var prerollNext = 0
         var voices = [Voice](repeating: Voice(), count: 16)
     }
     private let atState = AudioThreadState()
@@ -141,6 +151,7 @@ final class MetronomeEngine {
     // render block (a cheap COW retain). Only `render`/`mix` touch these, so there is no race.
     private var atSelectedTable: [[Float]] = []
     private var atPickupTable: [[Float]] = []
+    private var atClassicPickupTable: [[Float]] = []
     private var atVoiceTable: [[Float]] = []
     private var atVoiceSyllableTable: [[Float]] = []
     private var atClassicTable: [[Float]] = []
@@ -329,18 +340,42 @@ final class MetronomeEngine {
         setRunning(true)
     }
 
+    /// Expands `song` into a `SongPlan` at the live rate, resolving each section's Voice/counting inheritance
+    /// first (song-global default + per-section overrides + the app-global speak-subdivisions preference).
+    /// The plan carries voice only when at least one section counts out loud, so a classic-click song takes
+    /// the byte-for-byte-unchanged no-voice path.
+    private func makeSongPlan(_ song: Song) -> (plan: SongPlan, voice: SongVoicePlan) {
+        let global = control.withLock { $0.speakSubdivisions }
+        let voice = SongVoicePlan.resolve(song: song, globalSpeakSubdivisions: global)
+        let plan = SongPlan(song: song, sampleRate: configuredSampleRate,
+                            voice: voice.anyVoiceEnabled ? voice : nil)
+        return (plan, voice)
+    }
+
+    /// The song-START pickup lead-in: the song-level anacrusis (`song.pickupTicks`) in the FIRST section's
+    /// grid, resolving to the song's very first downbeat (frame 0). `nil` when there is no song pickup.
+    private func songStartPreroll(_ song: Song, plan: SongPlan, voice: SongVoicePlan) -> SongPreroll? {
+        guard song.pickupTicks > 0, let s0 = song.sections.first, !plan.isEmpty else { return nil }
+        return SongPreroll(section: s0, pickupTicks: song.pickupTicks, downbeatFrame: plan.frame(at: 0),
+                           sampleRate: configuredSampleRate, speakSubdivisions: voice.speakSubdivisions(section: 0))
+    }
+
     /// Starts a whole song from its first click. The tempo-map is expanded once into a `SongPlan`
     /// (sample-accurate, zero drift across boundaries) and published to the *same* render callback
-    /// `start()` uses — song mode adds no timer/`asyncAfter` sounding, only a different onset source.
+    /// `start()` uses — song mode adds no timer/`asyncAfter` sounding, only a different onset source. A
+    /// song-level pickup (if set) plays once as a lead-in before the first downbeat.
     func startSong(_ song: Song) throws {
         guard !isManualRendering else { return }
         currentSong = song
         try ensureRealtimeEngineRunning()
-        let plan = SongPlan(song: song, sampleRate: configuredSampleRate)
+        let (plan, voice) = makeSongPlan(song)
+        if voice.anyVoiceEnabled { ensureVoiceRendered() }   // render spoken buffers if any section counts
+        let preroll = songStartPreroll(song, plan: plan, voice: voice)
         songModeActive = true
         control.withLock {
             $0.songPlan = plan
             $0.plan = nil
+            $0.songPreroll = preroll
             $0.running = true
             $0.resetRequested = true
         }
@@ -360,16 +395,40 @@ final class MetronomeEngine {
     /// Jumps song playback to the start of `sectionIndex` (restart current / skip next / previous). The
     /// render callback re-anchors its cursor on the next block — sample-accurate, no plan rebuild. Ensures
     /// the engine is running (resumes if it was paused). No-op outside song mode.
-    func seekSong(toSection sectionIndex: Int) {
+    ///
+    /// When `playPickup` is true (the default) and the target section has a pickup it opts into
+    /// (`pickupTicks > 0 && startWithPickup`), that section's lead-in plays ONCE before its downbeat — a
+    /// one-time count-in for starting/jumping there. It is never part of `songPlan`, so a continuous pass
+    /// through the section never replays it.
+    func seekSong(toSection sectionIndex: Int, playPickup: Bool = true) {
         guard !isManualRendering, songModeActive else { return }
-        let target: Int? = control.withLock { c -> Int? in
+        let sr = configuredSampleRate
+        // Under a tiny lock: resolve only cheap values (the target click, its downbeat frame, the section's
+        // resolved speak-subdivisions). Building the RenderPlan-backed pre-roll happens OUTSIDE the lock, so
+        // the audio thread is never blocked on that allocation.
+        let resolved = control.withLock { c -> (s: Int, target: Int, downbeat: Int, speakSubs: Bool)? in
             guard let plan = c.songPlan, plan.sectionCount > 0 else { return nil }
             let s = min(max(sectionIndex, 0), plan.sectionCount - 1)
-            return plan.firstClickIndex(ofSection: s)
+            let target = plan.firstClickIndex(ofSection: s)
+            let downbeat = target < plan.clickCount ? plan.frame(at: target) : plan.totalFrames
+            return (s, target, downbeat, plan.speakSubdivisions(section: s))
         }
-        guard let target else { return }
+        guard let resolved else { return }
+        var preroll: SongPreroll?
+        if playPickup, let song = currentSong, song.sections.indices.contains(resolved.s) {
+            let section = song.sections[resolved.s]
+            if section.pickupTicks > 0, section.startWithPickup {
+                preroll = SongPreroll(section: section, pickupTicks: section.pickupTicks,
+                                      downbeatFrame: resolved.downbeat, sampleRate: sr,
+                                      speakSubdivisions: resolved.speakSubs)
+            }
+        }
         do { try ensureRealtimeEngineRunning() } catch { return }
-        control.withLock { $0.songSeekClickIndex = target; $0.running = true }
+        control.withLock {
+            $0.songSeekClickIndex = resolved.target
+            $0.songPreroll = preroll
+            $0.running = true
+        }
         setRunning(true)
     }
 
@@ -460,6 +519,7 @@ final class MetronomeEngine {
             $0.classicTable = classic
             $0.clickTable = classic
             $0.pickupTable = classicPickup
+            $0.classicPickupTable = classicPickup   // stable classic pickup tone for song-mode lead-ins
             $0.voiceTable = []
             $0.voiceSyllableTable = []
             $0.voiceMode = false
@@ -518,19 +578,55 @@ final class MetronomeEngine {
     }
 
     /// Renders a whole `song` offline through the real song-mode render path and returns channel-0
-    /// float samples (index == absolute frame). Renders the song's exact integer length plus a short
-    /// tail so the final click's body is fully captured; no click exists at or after `totalFrames`,
-    /// so the tail cannot introduce a spurious onset.
+    /// float samples. The returned array is indexed from the first sound produced: with a song-level
+    /// pickup, sample 0 is the first pickup tick and the first downbeat lands `span` samples later
+    /// (playback begins on the lead-in, exactly as live); with no pickup, sample 0 is the downbeat as
+    /// before. Renders the song's length (plus the lead-in and a short tail so the final click's body is
+    /// captured); no click exists at or after the end, so the tail cannot introduce a spurious onset.
     func renderOfflineSong(_ song: Song) throws -> [Float] {
-        let plan = SongPlan(song: song, sampleRate: configuredSampleRate)
+        let (plan, voice) = makeSongPlan(song)
+        if voice.anyVoiceEnabled { ensureVoiceRendered() }
+        let preroll = songStartPreroll(song, plan: plan, voice: voice)
         control.withLock {
             $0.songPlan = plan
             $0.plan = nil
+            $0.songPreroll = preroll
             $0.running = true
             $0.resetRequested = true
         }
         let tail = Int((0.05 * configuredSampleRate).rounded())
-        return try drainOfflineRender(totalFrames: plan.totalFrames + tail)
+        let span = preroll?.span ?? 0     // the lead-in occupies [−span, 0) → captured as the first `span` samples
+        return try drainOfflineRender(totalFrames: span + plan.totalFrames + tail)
+    }
+
+    /// Renders a song offline as if the user SEEKED to `sectionIndex` from a standing start (the section's
+    /// pickup lead-in, if it opts in, plays before the section's downbeat, then the song continues to its
+    /// end). Sample 0 is the first pickup tick (or the section's downbeat when there is no pickup). Proves
+    /// the section pickup is audible on a seek — as opposed to a continuous pass, which never replays it.
+    func renderOfflineSongSeeking(_ song: Song, toSection sectionIndex: Int) throws -> [Float] {
+        let (plan, voice) = makeSongPlan(song)
+        guard !plan.isEmpty else { return [] }
+        if voice.anyVoiceEnabled { ensureVoiceRendered() }
+        let s = min(max(sectionIndex, 0), plan.sectionCount - 1)
+        let target = plan.firstClickIndex(ofSection: s)
+        let downbeat = target < plan.clickCount ? plan.frame(at: target) : plan.totalFrames
+        let section = song.sections[s]
+        let preroll: SongPreroll? = (section.pickupTicks > 0 && section.startWithPickup)
+            ? SongPreroll(section: section, pickupTicks: section.pickupTicks, downbeatFrame: downbeat,
+                          sampleRate: configuredSampleRate, speakSubdivisions: voice.speakSubdivisions(section: s))
+            : nil
+        control.withLock {
+            $0.songPlan = plan
+            $0.plan = nil
+            $0.songSeekClickIndex = target
+            $0.songPreroll = preroll
+            $0.running = true
+            $0.resetRequested = true
+        }
+        let tail = Int((0.05 * configuredSampleRate).rounded())
+        let span = preroll?.span ?? 0
+        // Output begins at (downbeat − span); render through the song's end plus a tail.
+        return try drainOfflineRender(totalFrames: max(0, plan.totalFrames - (downbeat - span)) + tail)
     }
 
     /// Renders the single-tempo click offline while switching from `first` to `second` partway through —
@@ -612,6 +708,7 @@ final class MetronomeEngine {
         var songPlan: SongPlan?
         var selectedTable: [[Float]] = []
         var pickupTable: [[Float]] = []
+        var classicPickupTable: [[Float]] = []
         var voiceTable: [[Float]] = []
         var voiceSyllableTable: [[Float]] = []
         var classicTable: [[Float]] = []
@@ -619,12 +716,14 @@ final class MetronomeEngine {
         var speakSubdivisions = true
         var voiceVolume = 1.0
         var seekClickIndex: Int?
+        var preroll: SongPreroll?
         control.withLockUnchecked { c in
             running = c.running
             plan = c.plan
             songPlan = c.songPlan
             selectedTable = c.clickTable
             pickupTable = c.pickupTable
+            classicPickupTable = c.classicPickupTable
             voiceTable = c.voiceTable
             voiceSyllableTable = c.voiceSyllableTable
             classicTable = c.classicTable
@@ -633,9 +732,11 @@ final class MetronomeEngine {
             voiceVolume = c.voiceVolume
             if c.resetRequested { c.resetRequested = false; didReset = true }
             if let s = c.songSeekClickIndex { seekClickIndex = s; c.songSeekClickIndex = nil }
+            if let p = c.songPreroll { preroll = p; c.songPreroll = nil }   // one-shot lead-in
         }
         atSelectedTable = selectedTable
         atPickupTable = pickupTable
+        atClassicPickupTable = classicPickupTable
         atVoiceTable = voiceTable
         atVoiceSyllableTable = voiceSyllableTable
         atClassicTable = classicTable
@@ -654,6 +755,7 @@ final class MetronomeEngine {
             atState.epochFrame = 0
             atState.nextClickIndex = 0
             atState.songFinishedPublished = false
+            atState.prerollClicks = []; atState.prerollNext = 0   // drop any prior lead-in
             atPlan = nil                    // force a fresh anchor on the first plan after the reset
             for i in atState.voices.indices { atState.voices[i].active = false }
         }
@@ -671,6 +773,18 @@ final class MetronomeEngine {
             atState.framesElapsed = target < sp.clickCount ? sp.frame(at: target) : sp.totalFrames
             atState.songFinishedPublished = false
             for i in atState.voices.indices { atState.voices[i].active = false }   // drop a ringing click
+        }
+
+        // Song-mode one-time pickup lead-in: load the published pre-roll and rewind the cursor to its first
+        // pickup tick (which may be a negative frame for a song-start pickup — the cursor is relative, so the
+        // downbeat still lands on the SongPlan frame the seek/reset anchored). Drained before the main stream
+        // below; it lives only here, so a continuous pass can never replay it.
+        if let preroll, !preroll.clicks.isEmpty, songPlan != nil {
+            atState.prerollClicks = preroll.clicks
+            atState.prerollNext = 0
+            atState.framesElapsed = preroll.clicks[0].frame
+            atState.songFinishedPublished = false
+            for i in atState.voices.indices { atState.voices[i].active = false }
         }
 
         let blockStart = atState.framesElapsed
@@ -697,8 +811,40 @@ final class MetronomeEngine {
         // 2) Trigger every onset falling within this block: [blockStart, blockEnd).
 
         if let songPlan {
-            // Song mode: walk the pre-expanded click stream by index. Same voice scheduling as below;
-            // only the onset/accent source differs (an array lookup instead of the closed form).
+            // 2a) One-time pickup lead-in: sound the pre-roll clicks in this block, BEFORE the main stream
+            // (their frames all precede the resume downbeat). In click mode a lead-in tick uses the distinct
+            // classic pickup tone (table 5) at its natural, never-strong gain; in Voice mode it speaks its
+            // tail-of-bar count (falling back to the classic click, table 2). Consumed once, then cleared.
+            if !atState.prerollClicks.isEmpty {
+                let resume = min(max(atState.nextClickIndex, 0), max(songPlan.clickCount - 1, 0))
+                let leadVoiceOn = songPlan.clickCount > 0 && songPlan.voiceEnabled(at: resume)
+                var pi = atState.prerollNext
+                while pi < atState.prerollClicks.count {
+                    let c = atState.prerollClicks[pi]
+                    if c.frame >= blockEnd { break }
+                    let offset = c.frame - blockStart
+                    if offset >= 0 {
+                        if leadVoiceOn {
+                            if c.token != .none && c.speaks {
+                                scheduleVoiceToken(c.token, level: c.accent, at: offset,
+                                                   into: ablPtr, frameCount: frames, clickFallbackTable: 2)
+                            } else {
+                                triggerVoice(table: 2, bufferIndex: c.accent.rawValue, at: offset,
+                                             into: ablPtr, frameCount: frames, cutVoices: false)
+                            }
+                        } else {
+                            triggerVoice(table: 5, bufferIndex: c.accent.rawValue, at: offset,
+                                         into: ablPtr, frameCount: frames, cutVoices: false)
+                        }
+                    }
+                    pi += 1
+                }
+                atState.prerollNext = pi
+                if pi >= atState.prerollClicks.count { atState.prerollClicks = []; atState.prerollNext = 0 }
+            }
+
+            // 2b) Walk the pre-expanded click stream by index. The onset/accent source is an array lookup;
+            // each section either counts out loud (Voice) or clicks the classic tone, exactly as chosen.
             let count = songPlan.clickCount
             var idx = atState.nextClickIndex
             while idx < count {
@@ -707,12 +853,26 @@ final class MetronomeEngine {
                 let offset = onset - blockStart
                 if offset >= 0 {
                     let level = songPlan.accent(at: idx)
-                    // Song mode always uses the classic click (table 2). The selected timbre/voice is a
-                    // single-tempo choice, so songs sound exactly as they always have. A muted beat emits
-                    // no click but still publishes its pulse so the count/visual advance.
+                    // A muted beat emits no click but still publishes its pulse so the count/visual advance.
                     if level != .muted {
-                        triggerVoice(table: 2, bufferIndex: level.rawValue, at: offset,
-                                     into: ablPtr, frameCount: frames, cutVoices: false)
+                        if songPlan.voiceEnabled(at: idx) {
+                            // Count out loud: speak the beat number (always) / subdivision syllable (when the
+                            // section speaks subdivisions and the tempo allows). Non-spoken ticks and the
+                            // headless fallback click the CLASSIC click (table 2), so songs never adopt the
+                            // single-tempo selected timbre.
+                            let token = songPlan.voiceToken(at: idx)
+                            if token != .none && songPlan.speaksToken(at: idx) {
+                                scheduleVoiceToken(token, level: level, at: offset,
+                                                   into: ablPtr, frameCount: frames, clickFallbackTable: 2)
+                            } else {
+                                triggerVoice(table: 2, bufferIndex: level.rawValue, at: offset,
+                                             into: ablPtr, frameCount: frames, cutVoices: false)
+                            }
+                        } else {
+                            // Classic-click song (the default) — byte-for-byte the original song path.
+                            triggerVoice(table: 2, bufferIndex: level.rawValue, at: offset,
+                                         into: ablPtr, frameCount: frames, cutVoices: false)
+                        }
                     }
                     publishSongPulse(plan: songPlan, index: idx, level: level)
                 }
@@ -822,10 +982,12 @@ final class MetronomeEngine {
     }
 
     /// Schedules the Voice sound for one tick: a spoken number (table 1) or subdivision syllable
-    /// (table 3), cutting the previous spoken token so words don't slur; a click fallback (table 0) when
-    /// the token is `.none` or its buffer has not rendered (e.g. a headless environment).
+    /// (table 3), cutting the previous spoken token so words don't slur; a click fallback when the token
+    /// is `.none` or its buffer has not rendered (e.g. a headless environment). The fallback click table is
+    /// `clickFallbackTable` — 0 (the selected timbre) for single-tempo, 2 (the classic click) for song mode.
     private func scheduleVoiceToken(_ token: VoiceToken, level: AccentLevel, at offset: Int,
-                                    into abl: UnsafeMutableAudioBufferListPointer, frameCount: Int) {
+                                    into abl: UnsafeMutableAudioBufferListPointer, frameCount: Int,
+                                    clickFallbackTable: Int = 0) {
         switch token {
         case .number(let i):
             if i >= 0, i < atVoiceTable.count, !atVoiceTable[i].isEmpty {
@@ -843,7 +1005,7 @@ final class MetronomeEngine {
         case .none:
             break
         }
-        triggerVoice(table: 0, bufferIndex: level.rawValue, at: offset,
+        triggerVoice(table: clickFallbackTable, bufferIndex: level.rawValue, at: offset,
                      into: abl, frameCount: frameCount, cutVoices: false)
     }
 
@@ -868,13 +1030,14 @@ final class MetronomeEngine {
 
     /// The buffer a voice reads from, by table id: 0 = selected click timbre, 1 = spoken number,
     /// 2 = classic click (song mode / fallback), 3 = spoken subdivision syllable, 4 = pickup click (the
-    /// selected timbre pitch-shifted).
+    /// selected timbre pitch-shifted, single-tempo), 5 = classic pickup click (the song-mode lead-in tone).
     private func voiceBuffer(table: Int, index: Int) -> [Float]? {
         switch table {
         case 1:  return atVoiceTable.indices.contains(index) ? atVoiceTable[index] : nil
         case 2:  return atClassicTable.indices.contains(index) ? atClassicTable[index] : nil
         case 3:  return atVoiceSyllableTable.indices.contains(index) ? atVoiceSyllableTable[index] : nil
         case 4:  return atPickupTable.indices.contains(index) ? atPickupTable[index] : nil
+        case 5:  return atClassicPickupTable.indices.contains(index) ? atClassicPickupTable[index] : nil
         default: return atSelectedTable.indices.contains(index) ? atSelectedTable[index] : nil
         }
     }
