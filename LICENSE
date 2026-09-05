@@ -1,0 +1,30 @@
+Maelzel — Proprietary Software License
+Copyright (c) 2026 Jacob Shersh. All rights reserved.
+
+This repository and all of its contents (the "Software") — including the source
+code, project configuration, and original assets — are the proprietary and
+confidential property of the copyright holder. Maelzel is a commercial
+application sold on the Apple App Store. The Software is made publicly viewable
+on GitHub for reference and transparency ONLY; it is NOT open source, and no
+open-source license is granted.
+
+NO LICENSE OR PERMISSION is granted, express or implied, to any person to use,
+copy, reproduce, modify, adapt, translate, merge, publish, distribute, sell,
+sublicense, host, or create derivative works from the Software, in whole or in
+part, by any means, without the prior written permission of the copyright
+holder. Viewing the public repository does not grant any of these rights.
+
+THIRD-PARTY COMPONENTS: Certain bundled assets are the work of third parties and
+are governed by their own licenses, not by this license. In particular, the
+pre-generated voice samples in `Resources/Voice/` are derived from a CC0 (public
+domain) voice model — see the `NOTICE` file for attribution and terms. Nothing in
+this license restricts your rights in those separately-licensed components.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For licensing inquiries, contact the copyright holder.

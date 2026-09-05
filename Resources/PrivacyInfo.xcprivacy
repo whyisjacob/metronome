@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Maelzel privacy manifest.
+
+      The app does no tracking and collects/transmits NOTHING: it has no networking, no analytics,
+      and no third-party SDKs. Everything (songs, settings, recents) is stored locally on device.
+
+      The only "required-reason" API it uses is UserDefaults, to persist the user's own settings
+      (sound/voice/visual/mute preferences, recents). Reason CA92.1 = "Access info stored in user
+      defaults to read/write information that is only accessible to the app itself." No FileTimestamp,
+      SystemBootTime, DiskSpace, or ActiveKeyboard reasons apply (SongStore uses FileManager only for
+      existence checks, directory creation, atomic read/write and copy/remove — never file timestamps).
+    -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

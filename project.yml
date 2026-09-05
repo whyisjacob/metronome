@@ -44,7 +44,20 @@ targets:
     platform: iOS
     deploymentTarget: "17.0"
     sources:
+      # Photo Smart Import is EXCLUDED from the v1 build (NOT deleted). The feature is already unreachable
+      # in the UI, and its PHPicker / UIImagePickerController(.camera) code links the camera + photo-library
+      # APIs — which would require purpose strings and invite an App Review "where do you use the camera?"
+      # rejection. Excluding the sources removes that API linkage; the NSCamera/NSPhotoLibrary usage strings
+      # were removed together (see `info.properties` below) so we don't ship ITMS-90683 (linked API + no
+      # purpose string) NOR a purpose string for a feature that can't be demonstrated. The code stays in the
+      # repo (git history + on disk) and returns later with an on-device Core ML model. To re-enable: delete
+      # this `excludes:` block, restore the two usage strings below, and un-exclude the SmartImport tests in
+      # the MetronomeTests target. (The source glob is recursive, hence the directory + file excludes.)
       - path: Sources/Metronome
+        excludes:
+          - "SmartImport"
+          - "SmartImport/**"
+          - "Views/SmartImportView.swift"
       # Pre-generated Voice-mode audio: spoken beat numbers (voice_1…voice_32) and subdivision syllables
       # (voice_and/e/a/trip/let). Declared as an explicit `resources` build phase so the .wav clips are
       # copied into the app bundle and found at runtime via Bundle.main.url(forResource:withExtension:).
@@ -52,6 +65,11 @@ targets:
       # reference would be a duplicate build file). Generated off-device by tools/generate_voice_samples.py
       # (Piper, voice en_US-joe-medium — OHF-Voice "joe" dataset, CC0; a male voice fine-tuned from lessac).
       - path: Resources/Voice
+        buildPhase: resources
+      # Apple-required privacy manifest. Declared as a bundled resource so it lands at the app bundle ROOT
+      # (Maelzel.app/PrivacyInfo.xcprivacy), where Apple looks for it. Declares the single required-reason
+      # API the app touches (UserDefaults, reason CA92.1) and affirms no tracking / no data collection.
+      - path: Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
     # XcodeGen writes (and auto-excludes from the copy phase) this Info.plist from the
     # properties below, so it does not need to be hand-maintained on Windows.
@@ -85,11 +103,10 @@ targets:
             CFBundleTypeRole: Editor
             LSItemContentTypes:
               - app.metronome.mobile.song
-        # Photo Smart Import: read a score's tempo + time signature on-device with Vision OCR. The camera
-        # capture path needs NSCameraUsageDescription; PHPicker (library) technically needs no permission,
-        # but NSPhotoLibraryUsageDescription is declared for completeness / any future direct access.
-        NSCameraUsageDescription: "Maelzel uses the camera so you can photograph sheet music; it reads the tempo and time signature on your device."
-        NSPhotoLibraryUsageDescription: "Maelzel reads a photo of sheet music you choose to detect its tempo and time signature on your device."
+        # Photo Smart Import (camera + photo-library) is excluded from the v1 build (see the `excludes:`
+        # under this target's `sources`), so NSCameraUsageDescription and NSPhotoLibraryUsageDescription
+        # are intentionally NOT declared: the app links neither API. Restore both keys here — with the
+        # original photograph-your-sheet-music copy — when SmartImport is re-enabled.
         UILaunchScreen:
           UIColorName: ""
         # Background audio so the click keeps sounding when the screen locks or the app
@@ -110,7 +127,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.metronome.mobile
-        TARGETED_DEVICE_FAMILY: "1,2"
+        # iPhone-only for the 1.0 release. Universal ("1,2") forces App Store Connect to require iPad 13"
+        # screenshots for a layout that has never been tested on iPad. iPad support is deferred to a later
+        # version — this is a one-line revert back to "1,2" (plus iPad screenshots) when that layout is ready.
+        TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -120,13 +140,42 @@ targets:
     platform: iOS
     deploymentTarget: "17.0"
     sources:
+      # These five SmartImport test files are excluded in lockstep with the SmartImport sources being
+      # excluded from the Metronome app target above: they `@testable import` OCR / view-model types that
+      # are no longer compiled into the app, so leaving them in would break the *test build itself* (a
+      # compile error, not a red suite). They return with the feature. Every other test is untouched.
       - path: Tests/MetronomeTests
+        excludes:
+          - "SheetMusicOCRParserTests.swift"
+          - "SheetMusicOCRDistractorTests.swift"
+          - "SheetMusicOCRScoreTests.swift"
+          - "SheetMusicOCRGeometryTests.swift"
+          - "SmartImportViewModelTests.swift"
     dependencies:
       - target: Metronome
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.metronome.mobile.tests
         GENERATE_INFOPLIST_FILE: "YES"
+
+  # XCUITest bundle that launches the app on a simulator, walks the real SwiftUI screens, and captures a
+  # screenshot of each as a kept-forever XCTAttachment. Kept OUT of the `Metronome` scheme's test action
+  # (it has its own `MetronomeUITests` scheme below), so the headless unit-test CI (.github/workflows/
+  # ios.yml) keeps running only the fast accuracy/unit suite. Driven by .github/workflows/screenshots.yml.
+  MetronomeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UITests/MetronomeUITests
+    dependencies:
+      - target: Metronome
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.metronome.mobile.uitests
+        GENERATE_INFOPLIST_FILE: "YES"
+        # The application this UI-test bundle launches and drives via XCUIApplication().
+        TEST_TARGET_NAME: Metronome
 
 schemes:
   Metronome:
@@ -140,3 +189,15 @@ schemes:
       gatherCoverageData: true
       targets:
         - MetronomeTests
+
+  # Separate scheme for the screenshot UI tests, run by .github/workflows/screenshots.yml. Isolated from
+  # the `Metronome` scheme so the unit-test CI (ios.yml) is entirely unaffected by it.
+  MetronomeUITests:
+    build:
+      targets:
+        Metronome: all
+        MetronomeUITests: all
+    test:
+      config: Debug
+      targets:
+        - MetronomeUITests

@@ -14,5 +14,11 @@ xcuserdata/
 .build/
 .swiftpm/
 
+# CI screenshot capture (produced by .github/workflows/screenshots.yml on the runner) + any local
+# screenshot scratch dir. The canonical marketing PNGs live in the run's `ui-screenshots` artifact.
+*.xcresult
+/screenshots/
+/_screenshots/
+
 # macOS
 .DS_Store
