@@ -1,8 +1,10 @@
 import Foundation
 
-// "Save as Song" building blocks. These are pure value-type conveniences that turn a live single-tempo
-// `MetronomeConfiguration` into a one-section `Song`; they add no timing behaviour and deliberately live
-// outside the Engine group so the verified engine files stay untouched.
+// "Save as Song" building blocks (formerly the misleadingly-named `SongDraft.swift` — there is no draft
+// system here). These are pure value-type conveniences that turn a live single-tempo
+// `MetronomeConfiguration` into a one-section `Song`, plus small section-editing helpers; they add no
+// timing behaviour and deliberately live outside the Engine group so the verified engine files stay
+// untouched.
 
 extension SongSection {
     /// A section that reproduces a live `MetronomeConfiguration` — same tempo, meter, subdivision, accents
@@ -68,6 +70,17 @@ extension Song {
     /// A copy with fresh identity but the SAME name — used on import so a shared song is added as a new
     /// library entry rather than silently overwriting an existing one with the same `id`.
     func reidentified() -> Song { copyWithFreshIDs(name: name) }
+
+    /// A copy with the section of the same `id` replaced (a no-op if none matches). The song builder uses
+    /// this to commit an in-progress section edit **live** — so an uncommitted edit inside the open section
+    /// editor survives a force-quit (autosave picks up each change) — and to restore the pre-edit snapshot
+    /// when the user taps Cancel. (P2.6)
+    func replacingSection(_ section: SongSection) -> Song {
+        guard let i = sections.firstIndex(where: { $0.id == section.id }) else { return self }
+        var copy = self
+        copy.sections[i] = section
+        return copy
+    }
 
     private func copyWithFreshIDs(name newName: String) -> Song {
         Song(id: UUID(),

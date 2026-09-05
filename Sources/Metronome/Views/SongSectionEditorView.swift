@@ -11,7 +11,12 @@ struct SongSectionEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let sectionID: UUID
-    private let onSave: (SongSection) -> Void
+    /// Called on EVERY change to the working section, so edits are committed to the song continuously and
+    /// an in-progress edit survives a force-quit (the builder autosaves each one). See P2.6.
+    private let onCommit: (SongSection) -> Void
+    /// Called when the user taps Cancel, so the builder can restore the pre-edit snapshot (Cancel must undo
+    /// the live-committed changes).
+    private let onCancel: () -> Void
 
     /// A throwaway metronome model the shared controls bind to. Never played (its engine is never started);
     /// it is purely the edit surface, so the section round-trips through the same value type the main screen
@@ -21,9 +26,12 @@ struct SongSectionEditorView: View {
     @State private var bars: Int
     @State private var repeatCount: Int
 
-    init(section: SongSection, onSave: @escaping (SongSection) -> Void) {
+    init(section: SongSection,
+         onCommit: @escaping (SongSection) -> Void,
+         onCancel: @escaping () -> Void) {
         self.sectionID = section.id
-        self.onSave = onSave
+        self.onCommit = onCommit
+        self.onCancel = onCancel
         _editVM = StateObject(wrappedValue: MetronomeViewModel(config: section.configuration))
         _name = State(initialValue: section.name)
         _bars = State(initialValue: section.bars)
@@ -79,11 +87,14 @@ struct SongSectionEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .foregroundStyle(Theme.textPrimary)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { onCancel(); dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { onSave(built); dismiss() }.fontWeight(.semibold)
+                    Button("Done") { onCommit(built); dismiss() }.fontWeight(.semibold)
                 }
             }
+            // Commit continuously so a force-quit mid-edit never reverts the section to its just-added
+            // defaults (P2.6). Each change flows to the song, which autosaves; Cancel restores the snapshot.
+            .onChange(of: built) { _, updated in onCommit(updated) }
         }
     }
 }

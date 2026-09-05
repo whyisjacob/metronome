@@ -18,8 +18,15 @@ struct SongLibraryView: View {
                 Theme.background.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 12) {
+                        if store.loadDidFail { loadFailBanner }
+                        if store.recoveredFromBackup { recoveredBanner }
                         if store.saveDidFail { saveFailBanner }
-                        if store.songs.isEmpty {
+                        if store.loadDidFail {
+                            // Recovery state: show ONLY the banner. Saving is blocked while the file is
+                            // undecodable, so we don't invite edits that couldn't persist — the user resolves
+                            // it first via "Try again" / "Start fresh".
+                            EmptyView()
+                        } else if store.songs.isEmpty {
                             emptyState
                         } else {
                             ForEach(store.songs) { song in
@@ -40,10 +47,12 @@ struct SongLibraryView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showImporter = true } label: { Image(systemName: "square.and.arrow.down") }
                         .accessibilityLabel("Import song")
+                        .disabled(store.loadDidFail)   // resolve the recovery state before importing
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: addSong) { Image(systemName: "plus") }
                         .accessibilityLabel("Add song")
+                        .disabled(store.loadDidFail)   // saving is blocked in the recovery state
                 }
             }
             .foregroundStyle(Theme.textPrimary)
@@ -60,6 +69,58 @@ struct SongLibraryView: View {
                     .preferredColorScheme(.dark)
             }
         }
+    }
+
+    /// Surfaces a present-but-unreadable songs file with a clear, non-technical message and a way to recover
+    /// (P1 data safety). The store has already copied the unreadable file aside and is refusing to overwrite
+    /// it, so the user's songs are NOT lost — this banner says so and offers the two safe next steps.
+    private var loadFailBanner: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.stop)
+                Text("Couldn’t read your saved songs. A copy of the file has been kept. Your songs were not deleted.")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 10) {
+                Button(action: { store.retryLoad() }) {
+                    Text("Try again").font(.system(size: 14, weight: .bold))
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(PillButtonStyle())
+                Button(action: { store.startFreshDiscardingCorrupt() }) {
+                    Text("Start fresh").font(.system(size: 14, weight: .bold))
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(PillButtonStyle())
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.stop.opacity(0.18)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stop.opacity(0.5)))
+    }
+
+    /// Reassures the user after an automatic recovery from the rolling backup (P1 data safety): the songs
+    /// file was unreadable but a backup was restored, so the library is whole again.
+    private var recoveredBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.shield.fill").foregroundStyle(Theme.start)
+            Text("We restored your songs from a backup. A copy of the unreadable file was kept, just in case.")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button("OK") { store.acknowledgeRecovery() }
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Theme.start)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.start.opacity(0.16)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.start.opacity(0.5)))
     }
 
     /// Surfaces a failed write so a save can never be lost silently (P1 data safety).

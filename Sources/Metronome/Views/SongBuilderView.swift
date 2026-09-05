@@ -12,6 +12,9 @@ struct SongBuilderView: View {
 
     @State private var song: Song
     @State private var editingSection: SongSection?
+    /// The section as it was when its editor opened, so Cancel can restore it after live-committed edits
+    /// (P2.6). Nil when no section editor is open.
+    @State private var preEditSnapshot: SongSection?
 
     init(song: Song, store: SongStore, metronome: MetronomeViewModel) {
         self.store = store
@@ -51,11 +54,11 @@ struct SongBuilderView: View {
             // Auto-save every edit so a long build is never lost (P1). Writes are atomic + synchronous.
             .onChange(of: song) { _, newSong in store.upsert(newSong) }
             .sheet(item: $editingSection) { section in
-                SongSectionEditorView(section: section) { updated in
-                    if let i = song.sections.firstIndex(where: { $0.id == updated.id }) {
-                        song.sections[i] = updated
-                    }
-                }
+                SongSectionEditorView(
+                    section: section,
+                    onCommit: { updated in song = song.replacingSection(updated) },  // live → autosaves (P2.6)
+                    onCancel: { if let snap = preEditSnapshot { song = song.replacingSection(snap) } }
+                )
                 .preferredColorScheme(.dark)
             }
         }
@@ -91,7 +94,7 @@ struct SongBuilderView: View {
                         SectionRow(index: index,
                                    count: song.sections.count,
                                    section: section,
-                                   onEdit: { editingSection = section },
+                                   onEdit: { beginEditing(section) },
                                    onMoveUp: { move(index, by: -1) },
                                    onMoveDown: { move(index, by: 1) },
                                    onDuplicate: { duplicate(index) },
@@ -131,7 +134,14 @@ struct SongBuilderView: View {
 
     private func addSection() {
         let section = SongSection(name: "Section \(song.sections.count + 1)")
-        song.sections.append(section)
+        song.sections.append(section)   // persisted immediately by autosave; edits then commit live (P2.6)
+        beginEditing(section)
+    }
+
+    /// Opens the section editor, snapshotting the section first so Cancel can restore it after the editor's
+    /// live-committed edits (P2.6).
+    private func beginEditing(_ section: SongSection) {
+        preEditSnapshot = section
         editingSection = section
     }
 
