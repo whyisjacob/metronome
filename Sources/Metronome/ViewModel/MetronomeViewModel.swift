@@ -23,6 +23,22 @@ final class MetronomeViewModel: ObservableObject {
     /// Songs, or persistence, and it starts off every launch. Clamped to the current meter (see `Pickup`).
     @Published private(set) var pickup = Pickup.none
 
+    // MARK: - Song mode (drives the SAME engine + main screen — never a separate player)
+
+    /// The song currently loaded for playback, or `nil` in normal single-tempo mode. When non-nil, the
+    /// main screen shows the song's now-playing strip and the transport/visual reflect the song; the
+    /// single-tempo tempo/meter/subdivision controls are hidden (the song drives them per section).
+    @Published private(set) var activeSong: Song?
+    /// Index of the section currently sounding (from the engine pulse), or `nil` before start / after end.
+    @Published private(set) var currentSectionIndex: Int?
+    /// 1-based bar within the current section (from the engine pulse).
+    @Published private(set) var currentSongBar = 0
+    /// Set when the song has played to its end (the transport then offers a replay).
+    @Published private(set) var songFinished = false
+    /// Bumped on every `playSong` so the app shell can switch to the Metronome tab to reveal playback
+    /// (even when replaying the same song). Observed by `RootView`; carries no other meaning.
+    @Published private(set) var songLaunchNonce = 0
+
     // Visual beat indicator, refreshed by `pollPulse()` which the view drives at display rate.
     @Published private(set) var activeBeat: Int?
     @Published private(set) var activeAccent: AccentLevel = .normal
@@ -45,31 +61,57 @@ final class MetronomeViewModel: ObservableObject {
     /// `nil` in previews/tests, where the sound simply isn't persisted and defaults to the classic click.
     private let soundSettings: SoundSettingsStore?
 
-    // Read-through for views.
-    var bpm: Double { config.bpm }
-    var timeSignature: TimeSignature { config.timeSignature }
-    var subdivision: Subdivision { config.subdivision }
-    var accents: [BeatAccent] { config.accents }
+    /// The section currently sounding when a song is active, else `nil`. The single source that makes the
+    /// shared view-model reflect the song's per-section tempo/meter/subdivision/accents/groove.
+    var currentSongSection: SongSection? {
+        guard let song = activeSong, let i = currentSectionIndex, song.sections.indices.contains(i) else {
+            return nil
+        }
+        return song.sections[i]
+    }
+
+    /// The next section (for the "up next" strip), or `nil` on the final section.
+    var nextSongSection: SongSection? {
+        guard let song = activeSong, let i = currentSectionIndex, song.sections.indices.contains(i + 1) else {
+            return nil
+        }
+        return song.sections[i + 1]
+    }
+
+    /// What is actually sounding right now: the current section's configuration in song mode, otherwise the
+    /// single-tempo `config`. All the "current musical value" read-throughs below route through this, so the
+    /// SAME view-model's tempo/meter/subdivision/accents/groove reflect the song as it advances — no second
+    /// engine or view-model. In single-tempo mode this is exactly `config`, so nothing changes there.
+    var effectiveConfig: MetronomeConfiguration { currentSongSection?.configuration ?? config }
+
+    // Read-through for views. Section-aware in song mode via `effectiveConfig`.
+    var bpm: Double { effectiveConfig.bpm }
+    var timeSignature: TimeSignature { effectiveConfig.timeSignature }
+    var subdivision: Subdivision { effectiveConfig.subdivision }
+    var accents: [BeatAccent] { effectiveConfig.accents }
+    /// The chosen click timbre / Voice. A single-tempo choice (song mode always uses the classic click),
+    /// so this always reflects `config`, never a section.
     var sound: MetronomeSound { config.sound }
     /// Swing / shuffle amount (0…1); 0 is straight.
-    var swing: Double { config.swing }
+    var swing: Double { effectiveConfig.swing }
     /// Whether swing is actually audible at the current subdivision (an eighth/sixteenth grid) rather than
     /// merely set — the Groove UI reads this so it never claims a swing that the grid renders straight.
-    var swingIsAudible: Bool { config.swingIsAudible }
+    var swingIsAudible: Bool { effectiveConfig.swingIsAudible }
     /// The idiomatic sixteenth-grid cell currently applied (`.straight` = off).
-    var cell: RhythmCell { config.cell }
+    var cell: RhythmCell { effectiveConfig.cell }
     /// Whether the selected cell actually applies at the current subdivision (the sixteenth grid).
-    var cellIsActive: Bool { config.cellIsActive }
+    var cellIsActive: Bool { effectiveConfig.cellIsActive }
     /// Whether Voice mode speaks the in-between subdivision syllables (persisted; default on).
     var speakSubdivisions: Bool { soundSettings?.speakSubdivisions ?? true }
     /// Voice-mode spoken volume (0…1, independent of the click volume; persisted; default 1.0).
     var voiceVolume: Double { soundSettings?.voiceVolume ?? 1.0 }
 
-    /// Main beats (pulses) per bar of the current meter — the length of the accent pattern.
-    var beatsPerBar: Int { config.beatsPerBar }
-    /// Clicks per beat at the current subdivision (compound-aware).
-    var ticksPerBeat: Int { config.ticksPerBeat }
-    /// Total clicks per bar — the unit the count-in is denominated in.
+    /// Main beats (pulses) per bar of what's currently sounding (section-aware in song mode).
+    var beatsPerBar: Int { effectiveConfig.beatsPerBar }
+    /// Clicks per beat at the current subdivision (compound-aware; section-aware in song mode).
+    var ticksPerBeat: Int { effectiveConfig.ticksPerBeat }
+    /// Total clicks per bar of the single-tempo grid — the unit the count-in is denominated in (the pickup
+    /// is single-tempo only, so this stays on `config`).
     var ticksPerBar: Int { config.ticksPerBar }
     /// The largest count-in the current grid allows: a pickup is an *incomplete* bar, so at most
     /// `ticksPerBar − 1` ticks (0 for a one-tick bar, which can't have a pickup).
@@ -101,7 +143,15 @@ final class MetronomeViewModel: ObservableObject {
 
     // MARK: - Transport
 
-    func toggle() { isPlaying ? stop() : start() }
+    /// The main transport button. Song-aware: when a song is loaded it starts/stops the SONG on this same
+    /// engine; otherwise it starts/stops the single-tempo click.
+    func toggle() {
+        if activeSong != nil {
+            isPlaying ? stop() : replaySong()
+        } else {
+            isPlaying ? stop() : start()
+        }
+    }
 
     func start() {
         do {
@@ -116,6 +166,53 @@ final class MetronomeViewModel: ObservableObject {
     func stop() {
         engine.stop()
         setPlaying(false)
+    }
+
+    // MARK: - Song transport (same engine, same screen)
+
+    /// Loads a song and starts it on THIS engine, so the main screen becomes the song's display — there is
+    /// no separate player. Bumps `songLaunchNonce` so the shell reveals the Metronome tab. Safe to call
+    /// headlessly: the state is set even if the real-time engine can't start (errors are swallowed, exactly
+    /// like `start()`), so the shared view-model reflects the song regardless.
+    func playSong(_ song: Song) {
+        guard !song.sections.isEmpty else { return }
+        activeSong = song
+        currentSectionIndex = nil
+        currentSongBar = 0
+        songFinished = false
+        songLaunchNonce &+= 1
+        do { try engine.startSong(song) } catch { }
+        setPlaying(true)
+    }
+
+    /// Restarts the loaded song from its beginning (the transport's "play" when a song is loaded but
+    /// stopped/finished). Songs don't resume mid-way — a metronome count must start clean.
+    private func replaySong() {
+        guard let song = activeSong else { return }
+        currentSectionIndex = nil
+        currentSongBar = 0
+        songFinished = false
+        do { try engine.startSong(song) } catch { }
+        setPlaying(true)
+    }
+
+    /// Leaves song mode and returns the engine to the single-tempo click with the current `config`.
+    func exitSong() {
+        engine.stop()
+        setPlaying(false)
+        activeSong = nil
+        currentSectionIndex = nil
+        currentSongBar = 0
+        songFinished = false
+        engine.update(config)   // republish the single-tempo plan so the click is ready again
+    }
+
+    /// Applies the song position reported by the engine pulse. Also called directly by the integration
+    /// tests to prove the SAME view-model's tempo/meter/subdivision change per section as the song
+    /// advances — `effectiveConfig` (and thus `bpm`/`timeSignature`/`subdivision`) follows this index.
+    func updateSongPosition(sectionIndex: Int?, bar: Int) {
+        currentSectionIndex = sectionIndex
+        currentSongBar = bar
     }
 
     /// Called when the engine changes playback state on its own (interruption ended, headphones
@@ -134,9 +231,8 @@ final class MetronomeViewModel: ObservableObject {
             isOnBeat = false
             lastPulseSequence = 0
         }
-        #if canImport(UIKit)
-        UIApplication.shared.isIdleTimerDisabled = playing   // keep the screen awake while playing
-        #endif
+        // Keeping the screen awake is a UI concern applied in the view (`ContentView` observes
+        // `isPlaying`), so this view-model stays free of `UIApplication` and fully headless-testable.
     }
 
     // MARK: - Configuration edits
@@ -396,6 +492,19 @@ final class MetronomeViewModel: ObservableObject {
         let pulse = engine.currentPulse
         guard pulse.sequence != lastPulseSequence else { return }
         lastPulseSequence = pulse.sequence
+
+        // Song mode: reflect the engine's section/bar position (and stop cleanly at the end) before reading
+        // the beat, so `effectiveConfig`/`visualState` already point at the current section.
+        if activeSong != nil {
+            if pulse.songFinished {
+                songFinished = true
+                stop()
+                currentSectionIndex = nil
+                return
+            }
+            updateSongPosition(sectionIndex: pulse.sectionIndex, bar: (pulse.barInSection ?? 0) + 1)
+        }
+
         activeBeat = pulse.beatIndex
         activeAccent = pulse.accent
         flashID = pulse.sequence
@@ -404,20 +513,21 @@ final class MetronomeViewModel: ObservableObject {
         if let beat = pulse.beatIndex { displayBeat = beat }   // sticky: hold the beat through its subdivisions
         subdivisionPhase = BeatVisualState.nextSubdivisionPhase(previous: subdivisionPhase,
                                                                 wasBeat: wasBeat,
-                                                                ticksPerBeat: config.ticksPerBeat)
+                                                                ticksPerBeat: effectiveConfig.ticksPerBeat)
     }
 
     /// The immutable snapshot the selected beat indicator renders from — built from the polled pulse and
     /// the current configuration, so every indicator style stays synced to the audio.
     var visualState: BeatVisualState {
-        BeatVisualState(beatsPerMeasure: config.beatsPerBar,
-                        ticksPerBeat: config.ticksPerBeat,
-                        accents: accents,
-                        currentBeat: isPlaying ? displayBeat : nil,
-                        subdivisionPhase: subdivisionPhase,
-                        accentLevel: activeAccent,
-                        flashID: flashID,
-                        isPlaying: isPlaying,
-                        isOnBeat: isOnBeat)
+        let cfg = effectiveConfig   // section-aware in song mode, single-tempo `config` otherwise
+        return BeatVisualState(beatsPerMeasure: cfg.beatsPerBar,
+                               ticksPerBeat: cfg.ticksPerBeat,
+                               accents: cfg.accents,
+                               currentBeat: isPlaying ? displayBeat : nil,
+                               subdivisionPhase: subdivisionPhase,
+                               accentLevel: activeAccent,
+                               flashID: flashID,
+                               isPlaying: isPlaying,
+                               isOnBeat: isOnBeat)
     }
 }

@@ -1,56 +1,49 @@
 import SwiftUI
 
-/// The song library: lists saved songs, adds new ones, and launches edit / play. Reordering and
-/// deletion are available via the standard edit mode. Each row makes both actions obvious — tap the
-/// title to edit, tap the green button to play.
+/// The song library: saved songs as app-styled cards. Tap a card to edit; tap ▶ to play (on the SAME
+/// metronome — playback opens the Metronome tab, never a separate player). Add with +, duplicate/delete
+/// from each card's menu. Styled with the app's `Card`/`Theme`/`ScrollView` idiom to match every other
+/// screen (no system `List`).
 struct SongLibraryView: View {
     @ObservedObject var store: SongStore
-    @ObservedObject var settings: VisualSettingsStore
+    @ObservedObject var metronome: MetronomeViewModel
+
     @State private var editingSong: Song?
-    @State private var playingSong: Song?
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Theme.background.ignoresSafeArea()
-                content
+                ScrollView {
+                    if store.songs.isEmpty {
+                        emptyState
+                    } else {
+                        VStack(spacing: 12) {
+                            ForEach(store.songs) { song in
+                                SongCard(song: song,
+                                         onEdit: { editingSong = song },
+                                         onPlay: { metronome.playSong(song) },
+                                         onDuplicate: { store.upsert(song.duplicated()) },
+                                         onDelete: { store.delete(song) })
+                            }
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 20)
+                    }
+                }
             }
             .navigationTitle("Songs")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if !store.songs.isEmpty { EditButton() }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: addSong) { Image(systemName: "plus") }
                         .accessibilityLabel("Add song")
                 }
             }
+            .foregroundStyle(Theme.textPrimary)
             .sheet(item: $editingSong) { song in
-                SongBuilderView(song: song, store: store, settings: settings)
+                SongBuilderView(song: song, store: store, metronome: metronome)
                     .preferredColorScheme(.dark)
             }
-            .fullScreenCover(item: $playingSong) { song in
-                SongPlayView(song: song, settings: settings)
-                    .preferredColorScheme(.dark)
-            }
-        }
-    }
-
-    @ViewBuilder private var content: some View {
-        if store.songs.isEmpty {
-            emptyState
-        } else {
-            List {
-                ForEach(store.songs) { song in
-                    SongRow(song: song,
-                            onEdit: { editingSong = song },
-                            onPlay: { playingSong = song })
-                        .listRowBackground(Theme.surface)
-                }
-                .onDelete { store.delete(at: $0) }
-                .onMove { store.move(fromOffsets: $0, toOffset: $1) }
-            }
-            .scrollContentBackground(.hidden)
         }
     }
 
@@ -61,12 +54,14 @@ struct SongLibraryView: View {
                 .foregroundStyle(Theme.textSecondary)
             Text("No songs yet")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
-            Text("Tap + to build a tempo-map — sections whose tempo and time signature change through the piece. Or tap the bookmark on the Metronome screen to save your current settings as a song.")
+            Text("Tap + to build a tempo-map — sections whose tempo, meter, subdivision and groove change through the piece. Or tap the bookmark on the Metronome screen to save your current settings as a song.")
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 36)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 80)
     }
 
     private func addSong() {
@@ -76,41 +71,64 @@ struct SongLibraryView: View {
     }
 }
 
-private struct SongRow: View {
+/// One library row as an app card: title + summary + a big Play button, with a menu for duplicate/delete.
+private struct SongCard: View {
     let song: Song
     let onEdit: () -> Void
     let onPlay: () -> Void
+    let onDuplicate: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onEdit) {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(song.name)
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("\(song.sections.count) section\(song.sections.count == 1 ? "" : "s") · \(song.totalBars) bars")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(song.name)
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(summary)
+                        .font(.system(size: 13))
                         .foregroundStyle(Theme.textSecondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
+            Menu {
+                Button { onEdit() } label: { Label("Edit", systemImage: "slider.horizontal.3") }
+                Button { onDuplicate() } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 40, height: 40)
+            }
+            .accessibilityLabel("More actions for \(song.name)")
+
             Button(action: onPlay) {
                 Image(systemName: "play.circle.fill")
-                    .font(.system(size: 34))
+                    .font(.system(size: 40))
                     .foregroundStyle(song.sections.isEmpty ? Theme.beatIdle : Theme.start)
             }
             .buttonStyle(.plain)
             .disabled(song.sections.isEmpty)
             .accessibilityLabel("Play \(song.name)")
         }
-        .padding(.vertical, 4)
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 18).fill(Theme.surface))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Theme.stroke))
+    }
+
+    private var summary: String {
+        let sectionWord = song.sections.count == 1 ? "section" : "sections"
+        return "\(song.sections.count) \(sectionWord) · \(song.totalBars) bars · \(Self.duration(song))"
+    }
+
+    private static func duration(_ song: Song) -> String {
+        let total = Int(song.durationSeconds.rounded())
+        let m = total / 60, s = total % 60
+        return m > 0 ? "\(m):\(String(format: "%02d", s))" : "\(s)s"
     }
 }

@@ -34,6 +34,13 @@ struct SongSection: Identifiable, Equatable, Codable {
     var bars: Int
     /// Number of passes (≥1). The bars play `repeatCount` times back-to-back.
     var repeatCount: Int
+    /// Swing / shuffle amount (`0`…`1`) for this section — same model as `MetronomeConfiguration.swing`.
+    /// `0` (the default) keeps the section perfectly straight. Applied by `SongPlan` via the shared
+    /// `SwingGrid`, so a section's groove is bit-for-bit the single-tempo feel.
+    var swing: Double
+    /// A preset idiomatic rhythm cell on the sixteenth grid — same model as `MetronomeConfiguration.cell`.
+    /// `.straight` (the default) sounds every sixteenth.
+    var cell: RhythmCell
 
     init(id: UUID = UUID(),
          name: String = "Section",
@@ -42,7 +49,9 @@ struct SongSection: Identifiable, Equatable, Codable {
          subdivision: Subdivision = .quarter,
          accentPattern: [BeatAccent]? = nil,
          bars: Int = 1,
-         repeatCount: Int = 1) {
+         repeatCount: Int = 1,
+         swing: Double = 0,
+         cell: RhythmCell = .straight) {
         self.id = id
         self.name = name
         self.tempoBPM = tempoBPM.clamped(to: MetronomeConfiguration.tempoRange)
@@ -50,6 +59,8 @@ struct SongSection: Identifiable, Equatable, Codable {
         self.subdivision = subdivision
         self.bars = bars.clamped(to: SongSection.barsRange)
         self.repeatCount = repeatCount.clamped(to: SongSection.repeatRange)
+        self.swing = swing.clamped(to: MetronomeConfiguration.swingRange)
+        self.cell = cell
         // With no explicit pattern, adopt the meter's sensible default (downbeat + secondary group-head
         // accents), matching the single-tempo engine so a 6/8 section is felt in 2 by default.
         self.accentPattern = MetronomeConfiguration.normalizedAccents(accentPattern ?? timeSignature.defaultAccents,
@@ -57,9 +68,10 @@ struct SongSection: Identifiable, Equatable, Codable {
     }
 
     // Decode through the validating initializer so a hand-edited or older JSON file can never load an
-    // out-of-range tempo, a zero bar/repeat count, or a mis-sized accent array.
+    // out-of-range tempo, a zero bar/repeat count, or a mis-sized accent array. `swing`/`cell` are
+    // tolerated-if-missing so pre-groove song files still load (as straight).
     enum CodingKeys: String, CodingKey {
-        case id, name, tempoBPM, timeSignature, subdivision, accentPattern, bars, repeatCount
+        case id, name, tempoBPM, timeSignature, subdivision, accentPattern, bars, repeatCount, swing, cell
     }
 
     init(from decoder: Decoder) throws {
@@ -72,8 +84,10 @@ struct SongSection: Identifiable, Equatable, Codable {
         let accents = try c.decodeIfPresent([BeatAccent].self, forKey: .accentPattern)
         let bars = try c.decodeIfPresent(Int.self, forKey: .bars) ?? 1
         let repeatCount = try c.decodeIfPresent(Int.self, forKey: .repeatCount) ?? 1
+        let swing = try c.decodeIfPresent(Double.self, forKey: .swing) ?? 0
+        let cell = try c.decodeIfPresent(RhythmCell.self, forKey: .cell) ?? .straight
         self.init(id: id, name: name, tempoBPM: bpm, timeSignature: ts, subdivision: sub,
-                  accentPattern: accents, bars: bars, repeatCount: repeatCount)
+                  accentPattern: accents, bars: bars, repeatCount: repeatCount, swing: swing, cell: cell)
     }
 
     // MARK: - Derived timing (mirrors MetronomeConfiguration for a single section)

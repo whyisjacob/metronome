@@ -1,5 +1,8 @@
 import SwiftUI
 import Combine
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The main metronome screen — the absolute base only: the beat visual, the tempo (readout, slider, ±1,
 /// tap), Start/Stop, and the current time signature + subdivision (both changed constantly). *Everything*
@@ -36,27 +39,33 @@ struct ContentView: View {
                         .frame(height: 250)
                         .frame(maxWidth: .infinity)
 
-                    TempoControlView(viewModel: viewModel)
+                    if let song = viewModel.activeSong {
+                        // Song mode: the SAME screen becomes the song's display (now-playing strip +
+                        // section progress + transport + exit). No separate player.
+                        SongNowPlayingView(viewModel: viewModel, song: song)
+                    } else {
+                        TempoControlView(viewModel: viewModel)
 
-                    // Start/Stop sits high — right under the tempo readout — so it's prominent and within
-                    // easy one-handed reach, not buried at the bottom of the scroll.
-                    TransportButton(isPlaying: viewModel.isPlaying) {
-                        viewModel.toggle()
+                        // Start/Stop sits high — right under the tempo readout — so it's prominent and
+                        // within easy one-handed reach, not buried at the bottom of the scroll.
+                        TransportButton(isPlaying: viewModel.isPlaying) {
+                            viewModel.toggle()
+                        }
+
+                        // Meter + subdivision stay on the main screen: they're changed constantly, and
+                        // they're the "current time signature + subdivision" readout.
+                        MeterControlView(viewModel: viewModel)
+                        SubdivisionControlView(viewModel: viewModel)
+
+                        // Sound is a base control too — reached often — so the picker lives on the main
+                        // screen (SoundControlView is card-less, so wrap it in the shared titled card here).
+                        Card("Sound") {
+                            SoundControlView(viewModel: viewModel)
+                        }
+
+                        // A subtle pointer to everything else, one tap away in the unified Settings.
+                        settingsTag
                     }
-
-                    // Meter + subdivision stay on the main screen: they're changed constantly, and they're
-                    // the "current time signature + subdivision" readout.
-                    MeterControlView(viewModel: viewModel)
-                    SubdivisionControlView(viewModel: viewModel)
-
-                    // Sound is a base control too — reached often — so the picker lives on the main screen
-                    // (SoundControlView is card-less, so wrap it in the shared titled card here).
-                    Card("Sound") {
-                        SoundControlView(viewModel: viewModel)
-                    }
-
-                    // A subtle pointer to everything else, one tap away in the unified Settings.
-                    settingsTag
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
@@ -75,6 +84,13 @@ struct ContentView: View {
         }
         .foregroundStyle(Theme.textPrimary)
         .onReceive(ticker) { _ in viewModel.pollPulse() }
+        // Keep the screen awake while anything is playing (single-tempo or a song). Lives here, in the
+        // view, so the view-model stays UIKit-free and headless-testable.
+        .onChange(of: viewModel.isPlaying) { _, playing in
+            #if canImport(UIKit)
+            UIApplication.shared.isIdleTimerDisabled = playing
+            #endif
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(settings: settings, viewModel: viewModel,
                          soundSettings: soundSettings, recents: recents, store: store)
@@ -127,12 +143,16 @@ struct ContentView: View {
 
                 Spacer()
 
-                Button(action: presentSaveSong) {
-                    Image(systemName: "bookmark")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Theme.textSecondary)
+                // Save-as-Song captures the single-tempo settings; hide it while a song is playing (there
+                // are no single-tempo settings to save then).
+                if viewModel.activeSong == nil {
+                    Button(action: presentSaveSong) {
+                        Image(systemName: "bookmark")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .accessibilityLabel("Save as song")
                 }
-                .accessibilityLabel("Save as song")
             }
         }
         .padding(.top, 4)

@@ -1,142 +1,126 @@
 import SwiftUI
 
-/// Edits one `SongSection` — tempo, time signature, subdivision, length (bars × repeats) and the
-/// per-beat accent pattern. Holds each field in local state and reassembles a validated `SongSection`
-/// (through its clamping initializer) on Save.
+/// Edits one `SongSection`. Crucially it does NOT re-implement tempo / meter / subdivision / accents /
+/// groove — it drives a transient `MetronomeViewModel` (seeded from the section) with the **exact same**
+/// control components the main screen uses (`TempoControlView`, `MeterControlView`, `SubdivisionControlView`,
+/// `AccentRowView`, `GrooveControlView`), then reads the edited configuration back on Save. So there is
+/// exactly ONE implementation of each of those controls in the app, and editing a section looks and behaves
+/// identically to editing the main metronome. Only the section-specific fields (name, bars, repeats) are
+/// local to this screen.
 struct SongSectionEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let sectionID: UUID
     private let onSave: (SongSection) -> Void
 
+    /// A throwaway metronome model the shared controls bind to. Never played (its engine is never started);
+    /// it is purely the edit surface, so the section round-trips through the same value type the main screen
+    /// edits (`MetronomeConfiguration`).
+    @StateObject private var editVM: MetronomeViewModel
     @State private var name: String
-    @State private var tempo: Double
-    @State private var numerator: Int
-    @State private var denominator: Int
-    @State private var subdivision: Subdivision
     @State private var bars: Int
     @State private var repeatCount: Int
-    @State private var accents: [BeatAccent]
 
     init(section: SongSection, onSave: @escaping (SongSection) -> Void) {
         self.sectionID = section.id
         self.onSave = onSave
+        _editVM = StateObject(wrappedValue: MetronomeViewModel(config: section.configuration))
         _name = State(initialValue: section.name)
-        _tempo = State(initialValue: section.tempoBPM)
-        _numerator = State(initialValue: section.timeSignature.numerator)
-        _denominator = State(initialValue: section.timeSignature.denominator)
-        _subdivision = State(initialValue: section.subdivision)
         _bars = State(initialValue: section.bars)
         _repeatCount = State(initialValue: section.repeatCount)
-        _accents = State(initialValue: section.accentPattern)
     }
 
-    private var timeSig: TimeSignature { TimeSignature(numerator: numerator, denominator: denominator) }
-    /// Main beats (pulses) per bar — compound-aware, so 6/8 edits 2 beats, not 6.
-    private var beatCount: Int { max(1, timeSig.beatsPerBar) }
-    private var subdivisionOptions: [Subdivision] {
-        timeSig.isCompound ? Subdivision.compoundCases : Subdivision.allCases
-    }
-
+    /// The edited section — the shared controls' `MetronomeConfiguration` plus this screen's name/length,
+    /// keeping the original identity.
     private var built: SongSection {
-        SongSection(id: sectionID,
-                    name: name,
-                    tempoBPM: tempo,
-                    timeSignature: TimeSignature(numerator: numerator, denominator: denominator),
-                    subdivision: subdivision,
-                    accentPattern: accents,
-                    bars: bars,
-                    repeatCount: repeatCount)
+        let c = editVM.config
+        return SongSection(id: sectionID, name: name, tempoBPM: c.bpm,
+                           timeSignature: c.timeSignature, subdivision: c.subdivision,
+                           accentPattern: c.accents, bars: bars, repeatCount: repeatCount,
+                           swing: c.swing, cell: c.cell)
     }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Name") {
-                    TextField("Section name", text: $name)
-                }
+            ZStack {
+                Theme.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        Card("Section name") {
+                            TextField("Section name", text: $name)
+                                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                .textFieldStyle(.plain)
+                                .foregroundStyle(Theme.textPrimary)
+                        }
 
-                Section("Tempo") {
-                    HStack {
-                        Text("\(Int(tempo.rounded())) BPM")
-                            .font(.system(size: 17, weight: .semibold))
-                            .monospacedDigit()
-                        Spacer()
-                        Stepper("", value: $tempo, in: 30...300, step: 1).labelsHidden()
-                    }
-                    Slider(value: $tempo, in: 30...300, step: 1)
-                }
+                        // The SAME components the main screen uses — no parallel implementations.
+                        Card("Tempo") { TempoControlView(viewModel: editVM) }
+                        MeterControlView(viewModel: editVM)          // already a titled Card
+                        SubdivisionControlView(viewModel: editVM)    // already a titled Card
+                        Card("Accents") { AccentRowView(viewModel: editVM) }
+                        Card("Groove") { GrooveControlView(viewModel: editVM) }
 
-                Section("Time signature") {
-                    Stepper("Beats per bar: \(numerator)", value: $numerator, in: 1...16)
-                        .onChange(of: numerator) { _, _ in meterChanged() }
-                    Picker("Note value", selection: $denominator) {
-                        ForEach(TimeSignature.allowedDenominators, id: \.self) { Text("\($0)").tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: denominator) { _, _ in meterChanged() }
-                    if timeSig.isCompound {
-                        Text("Compound meter: felt in \(beatCount) — the beat is a dotted quarter.")
-                            .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
-                    }
-                }
-
-                Section("Subdivision") {
-                    Picker("Subdivision", selection: $subdivision) {
-                        ForEach(subdivisionOptions) { s in
-                            Text(timeSig.isCompound ? s.compoundDisplayName : s.displayName).tag(s)
+                        Card("Length") {
+                            LengthStepper(title: "Bars", value: bars, range: SongSection.barsRange,
+                                          format: { "\($0)" }, onChange: { bars = $0 })
+                            LengthStepper(title: "Repeat", value: repeatCount, range: SongSection.repeatRange,
+                                          format: { "×\($0)" }, onChange: { repeatCount = $0 })
+                            Text("This section plays \(bars) bar\(bars == 1 ? "" : "s")"
+                                 + (repeatCount > 1 ? ", \(repeatCount) times (\(bars * repeatCount) bars)." : "."))
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
-                    .pickerStyle(.segmented)
-                }
-
-                Section("Length") {
-                    Stepper("Bars: \(bars)", value: $bars, in: 1...512)
-                    Stepper("Repeat: ×\(repeatCount)", value: $repeatCount, in: 1...64)
-                }
-
-                Section("Accents") {
-                    HStack(spacing: 6) {
-                        ForEach(Array(0..<beatCount), id: \.self) { i in
-                            Button { cycleAccent(i) } label: {
-                                Text("\(i + 1)").frame(maxWidth: .infinity, minHeight: 38)
-                            }
-                            .buttonStyle(BeatAccentCellStyle(accent: accentAt(i)))
-                        }
-                    }
-                    Text("Tap to cycle: Accent → Medium → Normal → Muted.")
-                        .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 20)
                 }
             }
             .navigationTitle("Edit Section")
             .navigationBarTitleDisplayMode(.inline)
+            .foregroundStyle(Theme.textPrimary)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { onSave(built); dismiss() }
-                        .fontWeight(.semibold)
+                    Button("Save") { onSave(built); dismiss() }.fontWeight(.semibold)
                 }
             }
         }
     }
+}
 
-    private func accentAt(_ i: Int) -> BeatAccent { accents.indices.contains(i) ? accents[i] : .normal }
+/// A compact −/value/+ stepper for the section's bars/repeats (section-specific fields the main screen has
+/// no equivalent of), in the app's pill style.
+private struct LengthStepper: View {
+    let title: String
+    let value: Int
+    let range: ClosedRange<Int>
+    let format: (Int) -> String
+    let onChange: (Int) -> Void
 
-    /// Cycles beat `i` to its next accent state (strong → medium → normal → muted → strong).
-    private func cycleAccent(_ i: Int) {
-        var updated = MetronomeConfiguration.normalizedAccents(accents, count: beatCount)
-        if updated.indices.contains(i) { updated[i] = updated[i].next }
-        // Re-normalize so the downbeat is never left accent-less by omission.
-        accents = MetronomeConfiguration.normalizedAccents(updated, count: beatCount)
-    }
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title.uppercased())
+                .font(.system(size: 12, weight: .bold)).tracking(1.1)
+                .foregroundStyle(Theme.textSecondary)
+            Spacer(minLength: 8)
+            Button(action: { onChange(max(range.lowerBound, value - 1)) }) {
+                Image(systemName: "minus").font(.system(size: 16, weight: .bold)).frame(width: 44, height: 40)
+            }
+            .buttonStyle(PillButtonStyle())
+            .disabled(value <= range.lowerBound)
+            .accessibilityLabel("Fewer \(title)")
 
-    /// Keeps the accent array and subdivision consistent after a meter edit: resize the pattern to the
-    /// new main-beat count, and drop a now-invalid subdivision (e.g. a simple-meter triplet) when the
-    /// meter has become compound.
-    private func meterChanged() {
-        accents = MetronomeConfiguration.normalizedAccents(accents, count: beatCount)
-        if timeSig.isCompound && !Subdivision.compoundCases.contains(subdivision) {
-            subdivision = .quarter
+            Text(format(value))
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .frame(minWidth: 56)
+                .monospacedDigit()
+
+            Button(action: { onChange(min(range.upperBound, value + 1)) }) {
+                Image(systemName: "plus").font(.system(size: 16, weight: .bold)).frame(width: 44, height: 40)
+            }
+            .buttonStyle(PillButtonStyle())
+            .disabled(value >= range.upperBound)
+            .accessibilityLabel("More \(title)")
         }
     }
 }

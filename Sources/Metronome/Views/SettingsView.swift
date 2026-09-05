@@ -57,7 +57,7 @@ struct SettingsView: View {
             }
             .foregroundStyle(Theme.textPrimary)
             .sheet(item: $buildingSong) { song in
-                SongBuilderView(song: song, store: store, settings: settings)
+                SongBuilderView(song: song, store: store, metronome: viewModel)
                     .preferredColorScheme(.dark)
             }
         }

@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// App root: a two-tab shell. The single-tempo metronome, and the Songs library (a tempo-map laid out as
-/// a sequence of sections, played with the same sample-accurate engine). Visual preferences are shared
-/// across both tabs.
+/// App root: a two-tab shell over ONE metronome. The Metronome tab is the single transport/display for
+/// both the single-tempo click AND song playback — starting a song drives this same screen (there is no
+/// separate player). The Songs tab is the library/builder. Visual + sound preferences are shared.
 struct RootView: View {
     @StateObject private var metronome: MetronomeViewModel
     @StateObject private var songStore = SongStore()
@@ -10,10 +10,12 @@ struct RootView: View {
     @StateObject private var settings = VisualSettingsStore()
     @StateObject private var soundSettings: SoundSettingsStore
 
+    /// 0 = Metronome, 1 = Songs. A binding so playing a song can reveal the Metronome tab automatically.
+    @State private var selectedTab = 0
+
     init() {
-        // One shared RecentsStore: the view model registers changes into it, the metronome screen
-        // observes it for the quick-access row. One shared SoundSettingsStore persists the chosen sound
-        // and voice preference; the view model restores/writes it and Settings edits it.
+        // One shared RecentsStore + SoundSettingsStore, and ONE shared MetronomeViewModel that drives both
+        // the single-tempo click and song playback, so there is only ever one engine.
         let recents = RecentsStore()
         let sound = SoundSettingsStore()
         _recentsStore = StateObject(wrappedValue: recents)
@@ -22,15 +24,20 @@ struct RootView: View {
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             ContentView(viewModel: metronome, recents: recentsStore, settings: settings,
                         soundSettings: soundSettings, store: songStore)
                 .tabItem { Label("Metronome", systemImage: "metronome") }
+                .tag(0)
 
-            SongLibraryView(store: songStore, settings: settings)
+            SongLibraryView(store: songStore, metronome: metronome)
                 .tabItem { Label("Songs", systemImage: "music.note.list") }
+                .tag(1)
         }
         .tint(Theme.accentNormal)
+        // Any `playSong` (from the library, the builder, or the Settings launcher) bumps this nonce; reveal
+        // the Metronome tab so the user sees the song playing on the one shared screen.
+        .onChange(of: metronome.songLaunchNonce) { _, _ in selectedTab = 0 }
     }
 }
 

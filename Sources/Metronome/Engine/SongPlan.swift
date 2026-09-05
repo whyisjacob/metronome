@@ -78,17 +78,26 @@ final class SongPlan {
             let totalTicks = section.totalTicks
             let pattern = section.accentPattern
 
+            let swing = section.swing
+            let cell = section.cell
             for i in 0..<totalTicks {
                 // Closed form from the integer cursor: no per-tick accumulation → no intra-section drift.
-                frames.append(cursor + Int((Double(i) * fpt).rounded()))
+                // Swing rides the SAME `SwingGrid` the single-tempo path uses; at `swing == 0` it is
+                // exactly `round(i × fpt)`, so a straight section is byte-for-byte unchanged. On-beats never
+                // move, so section length (the cursor advance below) is unaffected by swing.
+                frames.append(cursor + SwingGrid.frame(forTick: i, ticksPerBeat: tpb,
+                                                       framesPerTick: fpt, swing: swing))
 
                 let tickWithinBar = i % ticksPerBar
                 let beat = tickWithinBar / tpb                         // beat this tick belongs to
-                let onBeat = tickWithinBar % tpb == 0
+                let posInBeat = tickWithinBar % tpb
+                let onBeat = posInBeat == 0
                 let beatAccent = pattern.indices.contains(beat) ? pattern[beat] : .normal
                 beatIndices.append(onBeat ? beat : -1)                 // -1 for a between-beats click
                 if beatAccent == .muted {
                     accents.append(.muted)                            // whole beat silent (engine skips it)
+                } else if cell.silences(posInBeat: posInBeat, ticksPerBeat: tpb) {
+                    accents.append(.muted)                            // cell-silenced sub-position (no-op when .straight)
                 } else if onBeat {
                     accents.append(beatAccent.audioLevel)             // strong / medium / normal
                 } else {
