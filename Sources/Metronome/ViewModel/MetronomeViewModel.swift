@@ -38,6 +38,16 @@ final class MetronomeViewModel: ObservableObject {
     /// Bumped on every `playSong` so the app shell can switch to the Metronome tab to reveal playback
     /// (even when replaying the same song). Observed by `RootView`; carries no other meaning.
     @Published private(set) var songLaunchNonce = 0
+    /// True when a song is loaded and paused (kept its position). Distinguishes Pause/Resume from a fresh
+    /// start; `false` when playing, stopped-at-start, or finished.
+    @Published private(set) var songPaused = false
+
+    /// Called whenever the active song's stored data changes here (e.g. the master tempo scale), so the app
+    /// can persist it to the `SongStore`. Set by the app shell; `nil` in previews/tests.
+    var onSongEdited: ((Song) -> Void)?
+
+    /// The active song's master tempo scale (1.0 = each section's own BPM). See `Song.tempoScale`.
+    var tempoScale: Double { activeSong?.tempoScale ?? 1.0 }
 
     // Visual beat indicator, refreshed by `pollPulse()` which the view drives at display rate.
     @Published private(set) var activeBeat: Int?
@@ -143,11 +153,14 @@ final class MetronomeViewModel: ObservableObject {
 
     // MARK: - Transport
 
-    /// The main transport button. Song-aware: when a song is loaded it starts/stops the SONG on this same
-    /// engine; otherwise it starts/stops the single-tempo click.
+    /// The main transport button. Song-aware: while a song is loaded it **pauses/resumes** (keeping
+    /// position), or starts fresh from the top when stopped/finished; otherwise it starts/stops the
+    /// single-tempo click.
     func toggle() {
         if activeSong != nil {
-            isPlaying ? stop() : replaySong()
+            if isPlaying { pauseSong() }
+            else if songPaused { resumeSong() }
+            else { replaySong() }
         } else {
             isPlaying ? stop() : start()
         }
@@ -180,21 +193,90 @@ final class MetronomeViewModel: ObservableObject {
         currentSectionIndex = nil
         currentSongBar = 0
         songFinished = false
+        songPaused = false
         songLaunchNonce &+= 1
-        do { try engine.startSong(song) } catch { }
+        // Play the master-tempo-scaled copy; the stored song's per-section BPMs are untouched.
+        do { try engine.startSong(song.playbackScaled()) } catch { }
         setPlaying(true)
     }
 
     /// Restarts the loaded song from its beginning (the transport's "play" when a song is loaded but
-    /// stopped/finished). Songs don't resume mid-way — a metronome count must start clean.
+    /// stopped/finished). Songs don't resume mid-way from a full stop — a metronome count must start clean.
     private func replaySong() {
         guard let song = activeSong else { return }
         currentSectionIndex = nil
         currentSongBar = 0
         songFinished = false
-        do { try engine.startSong(song) } catch { }
+        songPaused = false
+        do { try engine.startSong(song.playbackScaled()) } catch { }
         setPlaying(true)
     }
+
+    /// Pause: stop sounding but KEEP the song's position, so Resume continues from here.
+    func pauseSong() {
+        guard activeSong != nil else { return }
+        engine.stop()          // pauses the audio engine, preserves the song cursor
+        songPaused = true
+        setPlaying(false)
+    }
+
+    /// Resume from where Pause left off (no reset).
+    func resumeSong() {
+        guard activeSong != nil, songPaused else { return }
+        do { try engine.resumeSong() } catch { return }
+        songPaused = false
+        setPlaying(true)
+    }
+
+    /// Restart the current section from its first beat.
+    func restartCurrentSection() {
+        guard activeSong != nil else { return }
+        engine.seekSong(toSection: currentSectionIndex ?? 0)
+        songPaused = false
+        setPlaying(true)
+    }
+
+    /// Skip to the next section (no-op past the last).
+    func skipToNextSection() {
+        guard let song = activeSong else { return }
+        let next = (currentSectionIndex ?? -1) + 1
+        guard next < song.sections.count else { return }
+        engine.seekSong(toSection: next)
+        songPaused = false
+        setPlaying(true)
+    }
+
+    /// Skip to the previous section (before the first, just restarts the current one).
+    func skipToPreviousSection() {
+        guard activeSong != nil else { return }
+        let prev = (currentSectionIndex ?? 0) - 1
+        engine.seekSong(toSection: max(prev, 0))
+        songPaused = false
+        setPlaying(true)
+    }
+
+    /// Sets the non-destructive master tempo scale for the whole song (1.0 = original). Every section's
+    /// effective BPM scales proportionally; the stored per-section BPMs never change. Persisted via
+    /// `onSongEdited`. While playing, rebuilds the scaled plan and returns to the current section so the
+    /// change is heard immediately without losing your place.
+    func setTempoScale(_ scale: Double) {
+        guard var song = activeSong else { return }
+        let clamped = min(max(scale, Song.tempoScaleRange.lowerBound), Song.tempoScaleRange.upperBound)
+        guard clamped != song.tempoScale else { return }
+        song.tempoScale = clamped
+        activeSong = song
+        onSongEdited?(song)
+        if isPlaying {
+            let section = currentSectionIndex ?? 0
+            do { try engine.startSong(song.playbackScaled()) } catch { }
+            engine.seekSong(toSection: section)   // rebuild scaled, return to where we were
+            songPaused = false
+            setPlaying(true)
+        }
+    }
+
+    /// Restores the master tempo to 100% (each section's own BPM).
+    func resetTempoScale() { setTempoScale(1.0) }
 
     /// Leaves song mode and returns the engine to the single-tempo click with the current `config`.
     func exitSong() {
@@ -204,6 +286,7 @@ final class MetronomeViewModel: ObservableObject {
         currentSectionIndex = nil
         currentSongBar = 0
         songFinished = false
+        songPaused = false
         engine.update(config)   // republish the single-tempo plan so the click is ready again
     }
 

@@ -63,14 +63,21 @@ extension Song {
 
     /// A copy with fresh identity (new song + section `UUID`s) and a "copy" suffix, so it can be upserted
     /// as a distinct library entry that never collides with the original in SwiftUI lists or the store.
-    func duplicated() -> Song {
+    func duplicated() -> Song { copyWithFreshIDs(name: name + " copy") }
+
+    /// A copy with fresh identity but the SAME name — used on import so a shared song is added as a new
+    /// library entry rather than silently overwriting an existing one with the same `id`.
+    func reidentified() -> Song { copyWithFreshIDs(name: name) }
+
+    private func copyWithFreshIDs(name newName: String) -> Song {
         Song(id: UUID(),
-             name: name + " copy",
+             name: newName,
              sections: sections.map {
                  SongSection(id: UUID(), name: $0.name, tempoBPM: $0.tempoBPM,
                              timeSignature: $0.timeSignature, subdivision: $0.subdivision,
                              accentPattern: $0.accentPattern, bars: $0.bars, repeatCount: $0.repeatCount,
                              swing: $0.swing, cell: $0.cell)
-             })
+             },
+             tempoScale: tempoScale)
     }
 }

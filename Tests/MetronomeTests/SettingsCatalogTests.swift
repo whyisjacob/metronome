@@ -7,11 +7,12 @@ import XCTest
 /// is left with no control, one of these fails.
 final class SettingsCatalogTests: XCTestCase {
 
-    /// The main screen is the base controls only — tempo, transport, meter, subdivision, beat visual, and
-    /// (reached often) the sound picker.
+    /// The main screen is the base controls only — tempo, transport, meter, subdivision, beat visual, the
+    /// sound picker, and the count-in / pickup (a primary control, moved out of Settings).
     func testMainScreenHoldsOnlyTheBaseControls() {
         let onMain = AppControl.allCases.filter { $0.placement == .mainScreen }
-        XCTAssertEqual(Set(onMain), [.tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound])
+        XCTAssertEqual(Set(onMain),
+                       [.tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound, .countIn])
     }
 
     /// Sound is a base, main-screen control — it must not also be stranded in a Settings section (a
@@ -45,9 +46,9 @@ final class SettingsCatalogTests: XCTestCase {
                        "a Settings section has no control, or a control references a missing section")
     }
 
-    func testSettingsSectionsAreTheExpectedNineInOrder() {
+    func testSettingsSectionsAreTheExpectedEightInOrder() {
         XCTAssertEqual(SettingsSection.allCases.map(\.rawValue),
-                       ["sections", "countIn", "voice", "groove", "accents", "visuals",
+                       ["sections", "voice", "groove", "accents", "visuals",
                         "borderFlash", "gapTrainer", "recents"])
         for section in SettingsSection.allCases {
             XCTAssertFalse(section.title.isEmpty, "\(section) has no title")
@@ -55,10 +56,10 @@ final class SettingsCatalogTests: XCTestCase {
         }
     }
 
-    /// The pickup / count-in control lives in its own "Count-in" Settings section (not stranded on the
-    /// main screen, which stays the base controls only).
-    func testCountInLivesInTheCountInSettingsSection() {
-        XCTAssertEqual(AppControl.countIn.placement, .settings(.countIn))
+    /// The pickup / count-in is now a primary main-screen control (moved out of Settings so it sits with
+    /// tempo / meter / subdivision).
+    func testCountInIsAMainScreenControl() {
+        XCTAssertEqual(AppControl.countIn.placement, .mainScreen)
     }
 
     /// Placement is total and single-valued: every control is exactly one of base / settings, and the two

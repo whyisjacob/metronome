@@ -6,11 +6,15 @@ import Foundation
 /// folder instead of the real Documents directory.
 ///
 /// Not `@MainActor`-isolated on purpose: it is a plain value store used from the main thread by the
-/// UI and driven synchronously by tests. Writes are atomic; IO errors are swallowed in this v2 cut
-/// (surfacing them is future work).
+/// UI and driven synchronously by tests. Writes are atomic and synchronous, so a change is on disk before
+/// the call returns (it survives app termination, not just backgrounding). A failed write is **surfaced**,
+/// not swallowed: `saveDidFail` flips true so the UI can warn the user, and `save()` returns success.
 final class SongStore: ObservableObject {
 
     @Published private(set) var songs: [Song] = []
+    /// True after the most recent write failed to reach disk. The UI reads this to warn "changes not
+    /// saved" instead of silently losing work. Cleared on the next successful save.
+    @Published private(set) var saveDidFail = false
 
     private let directory: URL
     private let fileName: String
@@ -35,14 +39,20 @@ final class SongStore: ObservableObject {
         songs = (try? JSONDecoder().decode([Song].self, from: data)) ?? []
     }
 
-    /// Writes the current list to disk atomically. Creates the directory if needed.
-    func save() {
+    /// Writes the current list to disk atomically and synchronously. Creates the directory if needed.
+    /// Returns whether the write reached disk and records failure in `saveDidFail` so a silent loss can't
+    /// happen — the UI surfaces it. `@discardableResult` so existing call sites are unaffected.
+    @discardableResult
+    func save() -> Bool {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(songs)
             try data.write(to: fileURL, options: .atomic)
+            if saveDidFail { saveDidFail = false }
+            return true
         } catch {
-            // v2: intentionally silent. Persistence failures surface as "changes not saved".
+            saveDidFail = true
+            return false
         }
     }
 

@@ -66,6 +66,25 @@ targets:
         # A metronome uses no encryption beyond Apple-exempt OS APIs, so declare
         # export-compliance up front — this skips the manual prompt in TestFlight.
         ITSAppUsesNonExemptEncryption: false
+        # Song sharing: export a custom "Maelzel Song" document type (JSON payload, .maelzelsong
+        # extension) and claim it as an owned document type so an AirDropped / Files-opened song opens
+        # in the app (handled by RootView's .onOpenURL). See SongTransfer / SongSharing.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: app.metronome.mobile.song
+            UTTypeDescription: Maelzel Song
+            UTTypeConformsTo:
+              - public.json
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - maelzelsong
+              public.mime-type:
+                - application/json
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Maelzel Song
+            LSHandlerRank: Owner
+            CFBundleTypeRole: Editor
+            LSItemContentTypes:
+              - app.metronome.mobile.song
         # Photo Smart Import: read a score's tempo + time signature on-device with Vision OCR. The camera
         # capture path needs NSCameraUsageDescription; PHPicker (library) technically needs no permission,
         # but NSPhotoLibraryUsageDescription is declared for completeness / any future direct access.

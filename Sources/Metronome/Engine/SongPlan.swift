@@ -127,6 +127,16 @@ final class SongPlan {
 
     var clickCount: Int { frames.count }
     var isEmpty: Bool { frames.isEmpty }
+    /// Number of sections in the expanded plan.
+    var sectionCount: Int { sectionClickCounts.count }
+
+    /// Index of the first click of section `s` in the flat stream — the seek target for "jump to section".
+    /// Clamped so an out-of-range section maps to the song start / end sensibly.
+    @inline(__always) func firstClickIndex(ofSection s: Int) -> Int {
+        guard s > 0 else { return 0 }
+        let upTo = min(s, sectionClickCounts.count)
+        return sectionClickCounts[0..<upTo].reduce(0, +)
+    }
 
     @inline(__always) func frame(at i: Int) -> Int { frames[i] }
     @inline(__always) func accent(at i: Int) -> AccentLevel { accents[i] }

@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// Builds / edits a song: rename it, and add / edit / reorder / duplicate / delete its sections, then
-/// play. Works on a local copy and commits to the `SongStore` on Save (Cancel discards). Play commits
-/// first, then starts the song on the SHARED metronome (the app reveals the Metronome tab) — there is no
-/// separate player. Styled with the app's `Card`/`Theme` idiom to match the rest of the app.
+/// play. **Auto-saves every edit** to the `SongStore` (P1 data safety — a long build is never lost if the
+/// app is killed mid-edit), so the toolbar is just "Done". Play starts the song on the SHARED metronome
+/// (the app reveals the Metronome tab) — there is no separate player. Share exports the song as a
+/// `.maelzelsong` file. Styled with the app's `Card`/`Theme` idiom to match the rest of the app.
 struct SongBuilderView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: SongStore
@@ -36,11 +37,19 @@ struct SongBuilderView: View {
             .navigationBarTitleDisplayMode(.inline)
             .foregroundStyle(Theme.textPrimary)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Done") { dismiss() }.fontWeight(.semibold)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { store.upsert(song); dismiss() }.fontWeight(.semibold)
+                    ShareLink(item: ExportedSong(song: song), preview: SharePreview(song.name)) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .disabled(song.sections.isEmpty)
+                    .accessibilityLabel("Share song")
                 }
             }
+            // Auto-save every edit so a long build is never lost (P1). Writes are atomic + synchronous.
+            .onChange(of: song) { _, newSong in store.upsert(newSong) }
             .sheet(item: $editingSection) { section in
                 SongSectionEditorView(section: section) { updated in
                     if let i = song.sections.firstIndex(where: { $0.id == updated.id }) {
@@ -73,7 +82,9 @@ struct SongBuilderView: View {
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                VStack(spacing: 10) {
+                // Lazy so a long song (50+ sections) builds and scrolls smoothly — rows are realized on
+                // demand. There is no cap on the number of sections (P2.7).
+                LazyVStack(spacing: 10) {
                     ForEach(Array(song.sections.enumerated()), id: \.element.id) { entry in
                         let index = entry.offset
                         let section = entry.element
@@ -173,7 +184,7 @@ private struct SectionRow: View {
                     Text(section.name)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.textPrimary)
-                    Text("\(section.tempoSummary) · \(section.meterAndFeel) · \(section.barsSummary)")
+                    Text("\(section.tempoSummary) · \(section.meterAndFeel)")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textSecondary)
                 }
@@ -181,6 +192,13 @@ private struct SectionRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            // Bar count pulled out and bumped up a skosh so it's easy to find at a glance (P2.5).
+            Text(section.barsSummary)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize()
 
             VStack(spacing: 2) {
                 Button(action: onMoveUp) {

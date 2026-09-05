@@ -54,6 +54,10 @@ final class MetronomeEngine {
         var songPlan: SongPlan?
         var running = false
         var resetRequested = false
+        /// Song-mode seek: the flat click index to jump to on the next render block (nil = no seek). The
+        /// callback re-anchors `framesElapsed`/`nextClickIndex` to it so a section restart/skip is
+        /// sample-accurate and never rebuilds the plan. Only used in song mode.
+        var songSeekClickIndex: Int?
         /// Sound buffers, published under this lock so a live sound change is race-free. All three are
         /// `[[Float]]` (indexed by accent level, or by beat for `voiceTable`) — COW value types, so the
         /// audio thread snapshots them with a cheap retain, never an allocation.
@@ -343,6 +347,32 @@ final class MetronomeEngine {
         setRunning(true)
     }
 
+    /// Resumes song playback from where it was paused (via `stop()`), WITHOUT resetting position: the render
+    /// callback continues from the preserved cursor. Used for Pause/Resume — distinct from `startSong`,
+    /// which restarts from the top. No-op outside song mode.
+    func resumeSong() throws {
+        guard !isManualRendering, songModeActive, currentSong != nil else { return }
+        try ensureRealtimeEngineRunning()
+        control.withLock { $0.running = true }   // NO resetRequested → continue from atState
+        setRunning(true)
+    }
+
+    /// Jumps song playback to the start of `sectionIndex` (restart current / skip next / previous). The
+    /// render callback re-anchors its cursor on the next block — sample-accurate, no plan rebuild. Ensures
+    /// the engine is running (resumes if it was paused). No-op outside song mode.
+    func seekSong(toSection sectionIndex: Int) {
+        guard !isManualRendering, songModeActive else { return }
+        let target: Int? = control.withLock { c -> Int? in
+            guard let plan = c.songPlan, plan.sectionCount > 0 else { return nil }
+            let s = min(max(sectionIndex, 0), plan.sectionCount - 1)
+            return plan.firstClickIndex(ofSection: s)
+        }
+        guard let target else { return }
+        do { try ensureRealtimeEngineRunning() } catch { return }
+        control.withLock { $0.songSeekClickIndex = target; $0.running = true }
+        setRunning(true)
+    }
+
     /// Restarts whichever mode was last active — used by interruption/route recovery so a song resumes
     /// as a song (from its start) rather than silently reverting to the single-tempo click.
     private func restartCurrent() throws {
@@ -588,6 +618,7 @@ final class MetronomeEngine {
         var voiceMode = false
         var speakSubdivisions = true
         var voiceVolume = 1.0
+        var seekClickIndex: Int?
         control.withLockUnchecked { c in
             running = c.running
             plan = c.plan
@@ -601,6 +632,7 @@ final class MetronomeEngine {
             speakSubdivisions = c.speakSubdivisions
             voiceVolume = c.voiceVolume
             if c.resetRequested { c.resetRequested = false; didReset = true }
+            if let s = c.songSeekClickIndex { seekClickIndex = s; c.songSeekClickIndex = nil }
         }
         atSelectedTable = selectedTable
         atPickupTable = pickupTable
@@ -628,6 +660,17 @@ final class MetronomeEngine {
 
         guard running, !atClassicTable.isEmpty else {
             return noErr    // paused (or buffers not ready): output silence, do not advance the grid
+        }
+
+        // Song-mode seek (section restart / skip / next / prev): re-anchor the cursor so the target click
+        // plays at the start of this block. Timing stays sample-accurate — the SongPlan frames are absolute
+        // and unchanged; only the cursor moves. Applied after any reset so a rebuild-then-seek lands here.
+        if let seekClickIndex, let sp = songPlan {
+            let target = min(max(seekClickIndex, 0), sp.clickCount)
+            atState.nextClickIndex = target
+            atState.framesElapsed = target < sp.clickCount ? sp.frame(at: target) : sp.totalFrames
+            atState.songFinishedPublished = false
+            for i in atState.voices.indices { atState.voices[i].active = false }   // drop a ringing click
         }
 
         let blockStart = atState.framesElapsed

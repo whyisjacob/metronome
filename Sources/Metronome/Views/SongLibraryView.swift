@@ -1,24 +1,27 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The song library: saved songs as app-styled cards. Tap a card to edit; tap ▶ to play (on the SAME
-/// metronome — playback opens the Metronome tab, never a separate player). Add with +, duplicate/delete
-/// from each card's menu. Styled with the app's `Card`/`Theme`/`ScrollView` idiom to match every other
-/// screen (no system `List`).
+/// metronome — playback opens the Metronome tab, never a separate player). Add with +, import with the
+/// download button, share/duplicate/delete from each card's menu. Styled with the app's
+/// `Card`/`Theme`/`ScrollView` idiom to match every other screen (no system `List`).
 struct SongLibraryView: View {
     @ObservedObject var store: SongStore
     @ObservedObject var metronome: MetronomeViewModel
 
     @State private var editingSong: Song?
+    @State private var showImporter = false
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Theme.background.ignoresSafeArea()
                 ScrollView {
-                    if store.songs.isEmpty {
-                        emptyState
-                    } else {
-                        VStack(spacing: 12) {
+                    VStack(spacing: 12) {
+                        if store.saveDidFail { saveFailBanner }
+                        if store.songs.isEmpty {
+                            emptyState
+                        } else {
                             ForEach(store.songs) { song in
                                 SongCard(song: song,
                                          onEdit: { editingSong = song },
@@ -27,24 +30,51 @@ struct SongLibraryView: View {
                                          onDelete: { store.delete(song) })
                             }
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 20)
                     }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 20)
                 }
             }
             .navigationTitle("Songs")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showImporter = true } label: { Image(systemName: "square.and.arrow.down") }
+                        .accessibilityLabel("Import song")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: addSong) { Image(systemName: "plus") }
                         .accessibilityLabel("Add song")
                 }
             }
             .foregroundStyle(Theme.textPrimary)
+            .fileImporter(isPresented: $showImporter,
+                          allowedContentTypes: [.maelzelSong, .json],
+                          allowsMultipleSelection: false) { result in
+                if case let .success(urls) = result, let url = urls.first,
+                   let song = SongImport.song(from: url) {
+                    store.upsert(song)
+                }
+            }
             .sheet(item: $editingSong) { song in
                 SongBuilderView(song: song, store: store, metronome: metronome)
                     .preferredColorScheme(.dark)
             }
         }
+    }
+
+    /// Surfaces a failed write so a save can never be lost silently (P1 data safety).
+    private var saveFailBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.stop)
+            Text("Couldn’t save your changes to disk. Free up space and try again.")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.stop.opacity(0.18)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stop.opacity(0.5)))
     }
 
     private var emptyState: some View {
@@ -97,6 +127,9 @@ private struct SongCard: View {
 
             Menu {
                 Button { onEdit() } label: { Label("Edit", systemImage: "slider.horizontal.3") }
+                ShareLink(item: ExportedSong(song: song), preview: SharePreview(song.name)) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
                 Button { onDuplicate() } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
                 Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
             } label: {

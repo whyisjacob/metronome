@@ -121,7 +121,6 @@ struct SettingsView: View {
     @ViewBuilder private func content(for section: SettingsSection) -> some View {
         switch section {
         case .sections:    EmptyView()   // rendered as a launcher in the section loop, not here
-        case .countIn:     CountInControlView(viewModel: viewModel)
         case .voice:       voiceSection
         case .groove:      GrooveControlView(viewModel: viewModel)
         case .accents:     AccentRowView(viewModel: viewModel)
@@ -137,7 +136,6 @@ struct SettingsView: View {
     private func subtitle(for section: SettingsSection) -> String {
         switch section {
         case .sections:    return ""      // the launcher supplies its own descriptive subtitle
-        case .countIn:     return viewModel.pickupTicks == 0 ? "Off" : viewModel.pickupNoteValueLabel(ticks: viewModel.pickupTicks)
         case .voice:       return soundSettings.speakSubdivisions ? "Counts subdivisions aloud" : "Beat numbers only"
         case .groove:      return grooveSummary
         case .accents:     return "\(viewModel.accents.count)-beat pattern"

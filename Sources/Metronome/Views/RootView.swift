@@ -38,6 +38,16 @@ struct RootView: View {
         // Any `playSong` (from the library, the builder, or the Settings launcher) bumps this nonce; reveal
         // the Metronome tab so the user sees the song playing on the one shared screen.
         .onChange(of: metronome.songLaunchNonce) { _, _ in selectedTab = 0 }
+        // Open-in: a `.maelzelsong` opened from Files or AirDrop is imported into the library, and we jump
+        // to the Songs tab so the user sees it land.
+        .onOpenURL { url in
+            if let song = SongImport.song(from: url) {
+                songStore.upsert(song)
+                selectedTab = 1
+            }
+        }
+        // Persist song-level edits made during playback (e.g. the master tempo scale) back to the library.
+        .onAppear { metronome.onSongEdited = { songStore.upsert($0) } }
     }
 }
 

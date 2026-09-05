@@ -57,6 +57,12 @@ struct ContentView: View {
                         MeterControlView(viewModel: viewModel)
                         SubdivisionControlView(viewModel: viewModel)
 
+                        // Count-in / pickup: a primary control (moved out of Settings), so a lead-in sits
+                        // with the base controls (CountInControlView is card-less — wrap it here).
+                        Card("Count-in") {
+                            CountInControlView(viewModel: viewModel)
+                        }
+
                         // Sound is a base control too — reached often — so the picker lives on the main
                         // screen (SoundControlView is card-less, so wrap it in the shared titled card here).
                         Card("Sound") {
