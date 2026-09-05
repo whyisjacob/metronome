@@ -34,6 +34,11 @@ final class SmartImportViewModel: ObservableObject {
     /// The raw detection (`nil` until OCR has run once). Drives the "what we found / found nothing" note.
     @Published private(set) var result: SheetMusicImportResult?
 
+    /// The exact strings OCR read off the photo (in reading order), surfaced on the review screen as a
+    /// "what we read" section. When parsing misses, this shows the user *why* — and what to type instead —
+    /// so the result is never a blank screen with no explanation.
+    @Published private(set) var recognizedText: [String] = []
+
     /// Tempo bounds mirror the engine's accepted range, so the review stepper can't dial in a value that
     /// would later be clamped on apply.
     let tempoRange = Int(MetronomeConfiguration.tempoRange.lowerBound)...Int(MetronomeConfiguration.tempoRange.upperBound)
@@ -46,24 +51,25 @@ final class SmartImportViewModel: ObservableObject {
     }
 
     /// Kick off OCR for a chosen image, then parse + seed the review fields. Called from the UI on the
-    /// main actor; the Vision work happens off-main inside the recognizer.
+    /// main actor; the Vision work (and image preprocessing) happens off-main inside the recognizer.
     func process(image: UIImage) {
         stage = .processing
         Task { [weak self] in
             guard let self else { return }
-            let lines = await self.recognizer.recognizedText(in: image)
-            self.ingest(recognizedLines: lines)
+            let lines = await self.recognizer.recognizedLines(in: image)
+            self.ingest(lines)
         }
     }
     #else
     init() {}
     #endif
 
-    /// Parse recognised OCR lines and seed the editable fields (keeping current values where nothing was
-    /// detected), then move to the review stage. Deliberately free of Vision/UIKit and split out from
-    /// `process(image:)`, so the recognise→parse→seed path is unit-testable with canned strings.
-    func ingest(recognizedLines: [String]) {
-        let detection = SheetMusicOCRParser.parse(recognizedLines: recognizedLines)
+    /// Parse recognised OCR lines (with geometry) and seed the editable fields (keeping current values
+    /// where nothing was detected), record the raw text for the review screen, then move to the review
+    /// stage. Free of Vision/UIKit, so the recognise→parse→seed path is unit-testable with canned lines.
+    func ingest(_ lines: [RecognizedTextLine]) {
+        recognizedText = lines.map(\.text).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let detection = SheetMusicOCRParser.parse(lines)
         result = detection
         if let bpm = detection.tempoBPM { tempoBPM = bpm.clamped(to: tempoRange) }
         if let ts = detection.timeSignature {
@@ -73,10 +79,16 @@ final class SmartImportViewModel: ObservableObject {
         stage = .review
     }
 
+    /// String convenience (tests / geometry-less callers): treats each string as a line with no geometry.
+    func ingest(recognizedLines: [String]) {
+        ingest(recognizedLines.map { RecognizedTextLine(text: $0) })
+    }
+
     /// Reset back to the source chooser (e.g. "try another photo").
     func reset() {
         stage = .chooser
         result = nil
+        recognizedText = []
     }
 
     /// Surface a **visible** failure when a chosen photo can't be loaded at all (e.g. an undecodable
@@ -85,6 +97,7 @@ final class SmartImportViewModel: ObservableObject {
     /// instead of nothing happening.
     func failedToLoadImage() {
         result = nil
+        recognizedText = []
         stage = .failed("Couldn’t load that photo. Please try another.")
     }
 

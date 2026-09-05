@@ -1,4 +1,5 @@
 import XCTest
+import CoreGraphics
 @testable import Metronome
 
 /// Verifies the SmartImport view model's recognise→parse→seed orchestration: given recognised OCR lines,
@@ -80,5 +81,24 @@ final class SmartImportViewModelTests: XCTestCase {
         vm.reset()   // the failure view's "Try again"
         XCTAssertEqual(vm.stage, .chooser)
         XCTAssertNil(vm.result)
+    }
+
+    /// The geometry-aware ingest path: a stacked numerator/denominator (no slash) is detected from the
+    /// boxes, an Italian tempo word is read, and the raw recognised text is exposed for the review screen.
+    func testIngestGeometryLinesDetectsStackedMeterAndRecordsRawText() {
+        let vm = SmartImportViewModel()
+        let lines = [
+            RecognizedTextLine(text: "Allegro", boundingBox: CGRect(x: 0.30, y: 0.85, width: 0.20, height: 0.05)),
+            RecognizedTextLine(text: "3", boundingBox: CGRect(x: 0.10, y: 0.60, width: 0.04, height: 0.05)),
+            RecognizedTextLine(text: "4", boundingBox: CGRect(x: 0.10, y: 0.52, width: 0.04, height: 0.05)),
+        ]
+        vm.ingest(lines)
+
+        XCTAssertEqual(vm.stage, .review)
+        XCTAssertEqual(vm.numerator, 3)
+        XCTAssertEqual(vm.denominator, 4)
+        XCTAssertEqual(vm.tempoBPM, 140)                       // "Allegro"
+        XCTAssertTrue(vm.foundSomething)
+        XCTAssertTrue(vm.recognizedText.contains("Allegro"))   // surfaced as "what we read"
     }
 }

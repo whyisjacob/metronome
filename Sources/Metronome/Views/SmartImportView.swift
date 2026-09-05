@@ -160,6 +160,7 @@ struct SmartImportView: View {
 
             tempoCard
             timeSignatureCard
+            rawTextCard
 
             VStack(spacing: 10) {
                 Button { apply() } label: {
@@ -219,6 +220,31 @@ struct SmartImportView: View {
                         Text("\(denom)").frame(maxWidth: .infinity, minHeight: 42)
                     }
                     .buttonStyle(SelectableStyle(isOn: vm.denominator == denom))
+                }
+            }
+        }
+    }
+
+    /// "What we read" — the raw OCR text. When parsing misses, this explains *why* (the user sees exactly
+    /// what Vision read) and lets them correct the fields above; it's never a blank screen with no reason.
+    @ViewBuilder private var rawTextCard: some View {
+        Card("What we read") {
+            if vm.recognizedText.isEmpty {
+                Text("No text was legible in this photo. Try again with a closer, well-lit, straight-on shot — or just set the tempo and meter above.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Raw text Vision read from the photo — check the fields above against it and correct anything that’s off.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textSecondary)
+                    ForEach(Array(vm.recognizedText.prefix(40).enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(Theme.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
         }
