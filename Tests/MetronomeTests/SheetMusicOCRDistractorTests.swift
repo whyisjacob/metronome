@@ -48,7 +48,7 @@ final class SheetMusicOCRDistractorTests: XCTestCase {
 
     func testSplitMetronomeMarkIsReassembledSpatially() {
         let page = [
-            line("Moderato", 0.08, 0.86, 0.14, 0.03),   // tempo word (maps to 114 on its own)
+            line("Moderato", 0.08, 0.86, 0.14, 0.03),   // tempo word (maps to 112 on its own)
             line("♩",        0.24, 0.86, 0.02, 0.03),   // beat glyph  ┐
             line("=",        0.27, 0.86, 0.015,0.03),   // equals      ├ three separate observations …
             line("132",      0.30, 0.86, 0.05, 0.03),   // number      ┘ … that together mean ♩ = 132
@@ -60,7 +60,7 @@ final class SheetMusicOCRDistractorTests: XCTestCase {
         ]
         let result = SheetMusicOCRParser.parse(page)
         // 132 wins because a glyph/= cue box sits right beside it; the measure number 112 is plausible in
-        // value but has no tempo context, and the word would have said 114 — the number is preferred.
+        // value but has no tempo context, and the word would have said 112 — the number is preferred.
         XCTAssertEqual(result.tempoBPM, 132)
         XCTAssertNil(result.tempoWord)
         XCTAssertEqual(result.timeSignature, TimeSignature(numerator: 3, denominator: 4))
@@ -70,13 +70,13 @@ final class SheetMusicOCRDistractorTests: XCTestCase {
 
     func testCutTimeAndWordTempoWithBottomNumberIgnored() {
         let page = [
-            line("Vivace", 0.09, 0.85, 0.10, 0.03),   // word tempo → 168 (no number on the page)
+            line("Vivace", 0.09, 0.85, 0.10, 0.03),   // word tempo → 166 (no number on the page)
             line("¢",      0.12, 0.72, 0.02, 0.045),  // cut time at the first system → 2/2
             line("44",     0.90, 0.03, 0.04, 0.020),  // bottom-right "44" (a page/opus number) — not a meter
             line("© 2026", 0.40, 0.03, 0.10, 0.020),
         ]
         let result = SheetMusicOCRParser.parse(page)
-        XCTAssertEqual(result.tempoBPM, 168)
+        XCTAssertEqual(result.tempoBPM, 166)
         XCTAssertEqual(result.tempoWord, "Vivace")
         XCTAssertEqual(result.timeSignature, TimeSignature(numerator: 2, denominator: 2),
                        "cut time — the bottom-margin 44 is positionally ruled out as a fused 4/4")

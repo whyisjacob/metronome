@@ -97,7 +97,7 @@ final class SmartImportViewModelTests: XCTestCase {
         XCTAssertEqual(vm.stage, .review)
         XCTAssertEqual(vm.numerator, 3)
         XCTAssertEqual(vm.denominator, 4)
-        XCTAssertEqual(vm.tempoBPM, 140)                       // "Allegro"
+        XCTAssertEqual(vm.tempoBPM, 138)                       // "Allegro"
         XCTAssertTrue(vm.foundSomething)
         XCTAssertTrue(vm.recognizedText.contains("Allegro"))   // surfaced as "what we read"
     }

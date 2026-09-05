@@ -44,26 +44,27 @@ final class SheetMusicOCRParserTests: XCTestCase {
     // MARK: - Tempo: Italian words (fallback when no number)
 
     func testItalianTempoWords() {
-        XCTAssertEqual(parse(["Largo"]).tempoBPM, 50)
-        XCTAssertEqual(parse(["Adagio"]).tempoBPM, 70)
+        // Representative teaching BPMs from the expanded tempo table (base absolute terms).
+        XCTAssertEqual(parse(["Largo"]).tempoBPM, 48)
+        XCTAssertEqual(parse(["Adagio"]).tempoBPM, 68)
         XCTAssertEqual(parse(["Andante"]).tempoBPM, 92)
-        XCTAssertEqual(parse(["Moderato"]).tempoBPM, 114)
-        XCTAssertEqual(parse(["Allegro"]).tempoBPM, 140)
-        XCTAssertEqual(parse(["Vivace"]).tempoBPM, 168)
+        XCTAssertEqual(parse(["Moderato"]).tempoBPM, 112)
+        XCTAssertEqual(parse(["Allegro"]).tempoBPM, 138)
+        XCTAssertEqual(parse(["Vivace"]).tempoBPM, 166)
         XCTAssertEqual(parse(["Presto"]).tempoBPM, 184)
     }
 
     func testTempoWordIsReportedForDisplay() {
         let result = parse(["Allegro"])
-        XCTAssertEqual(result.tempoBPM, 140)
+        XCTAssertEqual(result.tempoBPM, 138)
         XCTAssertEqual(result.tempoWord, "Allegro")
     }
 
     func testTempoWordCaseInsensitiveAndEmbedded() {
-        XCTAssertEqual(parse(["allegro"]).tempoBPM, 140)
-        XCTAssertEqual(parse(["ALLEGRO"]).tempoBPM, 140)
-        XCTAssertEqual(parse(["Allegro con brio"]).tempoBPM, 140)   // surrounding words don't hide it
-        XCTAssertEqual(parse(["Allegro,"]).tempoBPM, 140)           // trailing punctuation
+        XCTAssertEqual(parse(["allegro"]).tempoBPM, 138)
+        XCTAssertEqual(parse(["ALLEGRO"]).tempoBPM, 138)
+        XCTAssertEqual(parse(["Allegro con brio"]).tempoBPM, 146)   // 'con brio' nudges toward the fast end
+        XCTAssertEqual(parse(["Allegro,"]).tempoBPM, 138)           // trailing punctuation
     }
 
     func testExplicitNumberPreferredOverWord() {
