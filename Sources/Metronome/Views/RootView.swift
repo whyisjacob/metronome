@@ -9,6 +9,7 @@ struct RootView: View {
     @StateObject private var recentsStore: RecentsStore
     @StateObject private var settings = VisualSettingsStore()
     @StateObject private var soundSettings: SoundSettingsStore
+    @StateObject private var muteSettings: MuteSettingsStore
 
     /// 0 = Metronome, 1 = Songs. A binding so playing a song can reveal the Metronome tab automatically.
     @State private var selectedTab = 0
@@ -18,9 +19,12 @@ struct RootView: View {
         // the single-tempo click and song playback, so there is only ever one engine.
         let recents = RecentsStore()
         let sound = SoundSettingsStore()
+        let mute = MuteSettingsStore()
         _recentsStore = StateObject(wrappedValue: recents)
         _soundSettings = StateObject(wrappedValue: sound)
-        _metronome = StateObject(wrappedValue: MetronomeViewModel(recents: recents, soundSettings: sound))
+        _muteSettings = StateObject(wrappedValue: mute)
+        _metronome = StateObject(wrappedValue: MetronomeViewModel(recents: recents, soundSettings: sound,
+                                                                  muteSettings: mute))
     }
 
     var body: some View {

@@ -35,9 +35,20 @@ struct ContentView: View {
                 VStack(spacing: 16) {
                     header
 
-                    BeatVisualView(style: settings.indicatorStyle, state: viewModel.visualState)
+                    // The visual channel can be muted (pure-audio practice); it then shows the idle
+                    // indicator while the engine keeps the beat, so re-enabling it is instant and in-phase.
+                    BeatVisualView(style: settings.indicatorStyle,
+                                   state: viewModel.channels.visual
+                                        ? viewModel.visualState
+                                        : BeatVisualState.idle(beatsPerMeasure: viewModel.beatsPerBar,
+                                                               ticksPerBeat: viewModel.ticksPerBeat,
+                                                               accents: viewModel.accents))
                         .frame(height: 250)
                         .frame(maxWidth: .infinity)
+
+                    // Silent-practice: a prominent mute + Full / Count / Flash presets, on the main screen
+                    // so a musician can switch mid-practice. Common to single-tempo AND song mode.
+                    MuteControlView(viewModel: viewModel)
 
                     if let song = viewModel.activeSong {
                         // Song mode: the SAME screen becomes the song's display (now-playing strip +
@@ -82,7 +93,8 @@ struct ContentView: View {
             BorderFlashOverlay(flashID: viewModel.flashID,
                                isOnBeat: viewModel.isOnBeat,
                                accentLevel: viewModel.activeAccent,
-                               enabled: settings.borderFlashEnabled,
+                               // The border flash is part of the visual channel — muting Visual stops it too.
+                               enabled: settings.borderFlashEnabled && viewModel.channels.visual,
                                accentColor: settings.accentFlashColor,
                                normalColor: settings.normalFlashColor)
 

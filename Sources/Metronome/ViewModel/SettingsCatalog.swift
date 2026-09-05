@@ -16,6 +16,7 @@ enum AppControl: String, CaseIterable {
     case beatVisual         // the on-screen beat indicator
     case sound              // click timbre + Voice mode — reached often, so it lives on the main screen
     case countIn            // pickup / count-in: a lead-in before the first downbeat — a primary control
+    case silentPractice     // mute: click/voice/visual channels + Full/Count/Flash presets — hit mid-practice
 
     // Everything else — consolidated into the single collapsible Settings screen.
     case sectionBuilder     // entry point to the section / tempo-map builder (saves into the Songs library)
@@ -83,7 +84,7 @@ extension AppControl {
     /// to declare a home, and the test asserts the base set and that no section is left empty.
     var placement: ControlPlacement {
         switch self {
-        case .tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound, .countIn:
+        case .tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound, .countIn, .silentPractice:
             return .mainScreen
         case .sectionBuilder:  return .settings(.sections)
         case .voiceCounting:   return .settings(.voice)

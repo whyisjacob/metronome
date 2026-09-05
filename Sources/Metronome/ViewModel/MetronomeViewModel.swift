@@ -23,6 +23,12 @@ final class MetronomeViewModel: ObservableObject {
     /// Songs, or persistence, and it starts off every launch. Clamped to the current meter (see `Pickup`).
     @Published private(set) var pickup = Pickup.none
 
+    /// The mute / silent-practice output channels (click / voice / visual). A playback overlay held here —
+    /// not part of `MetronomeConfiguration` — but PERSISTED via `MuteSettingsStore`, so a musician's silent-
+    /// practice choice survives relaunch. Applied to the engine as pure gain gates (click/voice) and read by
+    /// the view for the visual gate; muting only ever changes WHAT sounds, never WHEN. See `OutputChannels`.
+    @Published private(set) var channels: OutputChannels = .full
+
     // MARK: - Song mode (drives the SAME engine + main screen — never a separate player)
 
     /// The song currently loaded for playback, or `nil` in normal single-tempo mode. When non-nil, the
@@ -70,6 +76,13 @@ final class MetronomeViewModel: ObservableObject {
     /// Optional persisted sound preferences (selected timbre + speak-subdivisions). Injected by the app;
     /// `nil` in previews/tests, where the sound simply isn't persisted and defaults to the classic click.
     private let soundSettings: SoundSettingsStore?
+    /// Optional persisted mute / silent-practice preference. Injected by the app; `nil` in previews/tests,
+    /// where the choice isn't persisted and defaults to full output.
+    private let muteSettings: MuteSettingsStore?
+    /// The single-tempo timbre to restore when leaving **Count only**, which transiently overlays the Voice
+    /// sound so the count is audible. Session-only and NOT persisted — the user's real sound preference in
+    /// `SoundSettingsStore` is never overwritten by the overlay. `nil` unless a Count-only overlay is live.
+    private var countOnlyPriorSound: MetronomeSound?
 
     /// The section currently sounding when a song is active, else `nil`. The single source that makes the
     /// shared view-model reflect the song's per-section tempo/meter/subdivision/accents/groove.
@@ -132,19 +145,26 @@ final class MetronomeViewModel: ObservableObject {
 
     init(config: MetronomeConfiguration = MetronomeConfiguration(),
          recents: RecentsStore? = nil,
-         soundSettings: SoundSettingsStore? = nil) {
+         soundSettings: SoundSettingsStore? = nil,
+         muteSettings: MuteSettingsStore? = nil) {
         self.recents = recents
         self.soundSettings = soundSettings
+        self.muteSettings = muteSettings
         // Restore the persisted sound preference (default classic) as the starting timbre, so the sound
         // you last chose is what you hear on launch; everything else (tempo, meter, …) starts fresh.
         var initial = config
         if let soundSettings { initial.sound = soundSettings.sound }
         self.config = initial
+        self.channels = muteSettings?.channels ?? .full
         engine.update(initial)
         if let soundSettings {
             engine.setSpeakSubdivisions(soundSettings.speakSubdivisions)
             engine.setVoiceVolume(soundSettings.voiceVolume)
         }
+        // Apply the restored mute channels to the engine, and re-establish the Count-only voice overlay if
+        // that's the restored state — so a persisted "Count only" actually counts out loud on launch.
+        applyChannelsToEngine()
+        updateCountOnlyVoiceOverlay(for: mutePreset)
         engine.onPlaybackStateChanged = { [weak self] playing in
             // Delivered on the main queue by the engine.
             self?.reconcilePlaybackState(playing)
@@ -364,8 +384,80 @@ final class MetronomeViewModel: ObservableObject {
     }
 
     func setSound(_ sound: MetronomeSound) {
+        // A manual sound choice wins: drop any Count-only voice-overlay memory so leaving Count-only later
+        // never stomps the user's deliberate pick.
+        countOnlyPriorSound = nil
         updateConfig { $0.sound = sound }
         soundSettings?.setSound(sound)
+    }
+
+    // MARK: - Mute / silent practice (three output channels + one-tap presets)
+
+    /// The preset the current channels correspond to (for the selector highlight), or `nil` for a custom
+    /// combination.
+    var mutePreset: MutePreset? { MutePreset.matching(channels) }
+    /// Whether ALL audio is muted (click + voice) — drives the speaker-slash icon and the running-but-silent
+    /// badge. The visual may still be on (flash-only practice), so this is about audio only.
+    var isAudioMuted: Bool { !channels.anyAudioOn }
+    /// Whether every channel is on (the unmuted default).
+    var isFullOutput: Bool { channels.isFull }
+
+    /// Applies a one-tap silent-practice preset (Full / Count / Flash): persists it and gates the engine.
+    func applyMutePreset(_ preset: MutePreset) { setChannels(preset.channels) }
+
+    /// The prominent one-tap "mute all": silences click + voice while the visual keeps the beat, or restores
+    /// full output. Reads as Flash-only ⇄ Full in the selector.
+    func toggleMuteAllAudio() {
+        setChannels(channels.anyAudioOn ? MutePreset.flashOnly.channels : MutePreset.full.channels)
+    }
+
+    /// Independent per-channel toggles — the composable primitives the presets are built from.
+    func setClickChannel(_ on: Bool)  { var c = channels; c.click = on;  setChannels(c) }
+    func setVoiceChannel(_ on: Bool)  { var c = channels; c.voice = on;  setChannels(c) }
+    func setVisualChannel(_ on: Bool) { var c = channels; c.visual = on; setChannels(c) }
+
+    /// One funnel for every channel change: publish, persist, gate the engine, and keep the Count-only voice
+    /// overlay in sync — so the presets and the raw toggles behave identically.
+    private func setChannels(_ next: OutputChannels) {
+        channels = next
+        muteSettings?.setChannels(next)
+        applyChannelsToEngine()
+        updateCountOnlyVoiceOverlay(for: MutePreset.matching(next))
+    }
+
+    private func applyChannelsToEngine() {
+        engine.setClickMuted(!channels.click)
+        engine.setVoiceMuted(!channels.voice)
+        // The visual channel is a view concern — `ContentView` reads `channels.visual`. The engine keeps
+        // publishing the beat pulse regardless, so re-enabling visuals is instantaneous and in-phase.
+    }
+
+    /// Keeps the "spoken count" overlay in sync with the channels: when the channels are exactly **Count
+    /// only** and we're in single-tempo mode with a non-Voice timbre, overlay the Voice sound so there is
+    /// actually a count to hear; otherwise restore the prior timbre. The overlay is transient (live config +
+    /// engine only) and NOT persisted — the saved sound preference and Recents are never touched. In song
+    /// mode each section keeps its own Voice/click choice, so the overlay never applies there (the click
+    /// channel is still muted, so click-only sections fall silent while counting sections keep counting).
+    private func updateCountOnlyVoiceOverlay(for preset: MutePreset?) {
+        let wantOverlay = (preset == .countOnly) && activeSong == nil && config.sound != .voice
+        if wantOverlay {
+            if countOnlyPriorSound == nil { countOnlyPriorSound = config.sound }
+            overlaySound(.voice)
+        } else if let prior = countOnlyPriorSound {
+            countOnlyPriorSound = nil
+            overlaySound(prior)
+        }
+    }
+
+    /// Switches the LIVE single-tempo timbre without persisting it or touching Recents — used only by the
+    /// Count-only overlay, so a mute preset never rewrites your saved sound or reshuffles Recents. Applied
+    /// live if playing (a sound-only swap is phase-compatible, so the running grid is preserved).
+    private func overlaySound(_ sound: MetronomeSound) {
+        guard config.sound != sound else { return }
+        config = MetronomeConfiguration(bpm: config.bpm, timeSignature: config.timeSignature,
+                                        subdivision: config.subdivision, accents: config.accents,
+                                        sound: sound, swing: config.swing, cell: config.cell)
+        engine.update(config)
     }
 
     /// Toggles whether Voice mode speaks the subdivisions aloud. Persists the preference and applies it to

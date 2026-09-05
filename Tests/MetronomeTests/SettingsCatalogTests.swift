@@ -8,11 +8,13 @@ import XCTest
 final class SettingsCatalogTests: XCTestCase {
 
     /// The main screen is the base controls only — tempo, transport, meter, subdivision, beat visual, the
-    /// sound picker, and the count-in / pickup (a primary control, moved out of Settings).
+    /// sound picker, the count-in / pickup, and the silent-practice mute (a primary control a musician hits
+    /// mid-practice, so it lives on the main screen alongside them).
     func testMainScreenHoldsOnlyTheBaseControls() {
         let onMain = AppControl.allCases.filter { $0.placement == .mainScreen }
         XCTAssertEqual(Set(onMain),
-                       [.tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound, .countIn])
+                       [.tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound, .countIn,
+                        .silentPractice])
     }
 
     /// Sound is a base, main-screen control — it must not also be stranded in a Settings section (a

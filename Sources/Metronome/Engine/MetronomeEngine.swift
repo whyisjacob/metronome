@@ -81,6 +81,12 @@ final class MetronomeEngine {
         /// Voice-mode gain applied to SPOKEN tokens (numbers + syllables) only, independent of the click
         /// volume. Clicks are never scaled, so the accuracy-critical click path is unchanged. Default 1.0.
         var voiceVolume: Double = 1.0
+        /// Silent-practice output gates. Applied as a GAIN of 0 in `mix` — they change only WHAT sounds,
+        /// never WHEN: the onset loop, accents, pickups and pulses are all untouched, so the tick grid is
+        /// byte-for-byte identical whether muted or not. Default `false` (audible), so the click path and
+        /// every accuracy suite (which never mute) render exactly as before. Read live by the render callback.
+        var clickMuted = false
+        var voiceMuted = false
         /// Sample rate `voiceTable` was rendered at (0 = none) and the rate currently rendering in the
         /// background (0 = idle). Guard the lazy voice render so it publishes/re-renders exactly once.
         var voiceRate: Double = 0
@@ -160,6 +166,10 @@ final class MetronomeEngine {
     /// Audio-thread snapshot of the spoken-voice gain (see `Control.voiceVolume`). Applied in `mix` to
     /// spoken tables only; 1.0 for clicks, so the click path is byte-for-byte unchanged.
     private var atVoiceVolume: Double = 1.0
+    /// Audio-thread snapshots of the silent-practice gates (see `Control.clickMuted`/`voiceMuted`). Applied
+    /// in `mix` as a gain of 0; both false by default, so the mix is byte-for-byte unchanged when unmuted.
+    private var atClickMuted = false
+    private var atVoiceMuted = false
     /// The single-tempo plan the audio thread is currently scheduling from. Compared by identity against
     /// the published plan each block to detect a live swap (a new `RenderPlan` from `update(_:)`); `nil`
     /// after a reset so the first plan anchors cleanly. Audio-thread-only, so no synchronization needed.
@@ -238,6 +248,19 @@ final class MetronomeEngine {
     /// never scaled, so the sample-accurate click path is byte-for-byte unchanged. Default 1.0.
     func setVoiceVolume(_ volume: Double) {
         control.withLock { $0.voiceVolume = max(0, min(1, volume)) }
+    }
+
+    /// Mutes / unmutes the CLICK output channel (silent-practice). A pure gain gate applied in the mix — it
+    /// silences the click without touching the schedule, so the tick grid and every scheduled onset are
+    /// byte-for-byte identical whether muted or not. Read live by the render callback; no plan rebuild.
+    func setClickMuted(_ muted: Bool) {
+        control.withLock { $0.clickMuted = muted }
+    }
+
+    /// Mutes / unmutes the VOICE (spoken-count) output channel, independent of the voice *volume*. Also a
+    /// pure gain gate in the mix, so it changes only WHAT sounds, never WHEN.
+    func setVoiceMuted(_ muted: Bool) {
+        control.withLock { $0.voiceMuted = muted }
     }
 
     // MARK: - Sound selection
@@ -715,6 +738,8 @@ final class MetronomeEngine {
         var voiceMode = false
         var speakSubdivisions = true
         var voiceVolume = 1.0
+        var clickMuted = false
+        var voiceMuted = false
         var seekClickIndex: Int?
         var preroll: SongPreroll?
         control.withLockUnchecked { c in
@@ -730,6 +755,8 @@ final class MetronomeEngine {
             voiceMode = c.voiceMode
             speakSubdivisions = c.speakSubdivisions
             voiceVolume = c.voiceVolume
+            clickMuted = c.clickMuted
+            voiceMuted = c.voiceMuted
             if c.resetRequested { c.resetRequested = false; didReset = true }
             if let s = c.songSeekClickIndex { seekClickIndex = s; c.songSeekClickIndex = nil }
             if let p = c.songPreroll { preroll = p; c.songPreroll = nil }   // one-shot lead-in
@@ -743,6 +770,8 @@ final class MetronomeEngine {
         atVoiceMode = voiceMode
         atSpeakSubdivisions = speakSubdivisions
         atVoiceVolume = voiceVolume
+        atClickMuted = clickMuted
+        atVoiceMuted = voiceMuted
 
         // Start from silence; voices/ticks mix in additively.
         for buffer in ablPtr {
@@ -1099,9 +1128,15 @@ final class MetronomeEngine {
 
         let fade = atState.voices[vi].fadeRemaining
         let releaseLen = max(voiceReleaseFrames, 1)
-        // Spoken tokens (numbers/syllables) are scaled by the voice volume; clicks stay at unity gain, so
-        // the sample-accurate click path is byte-for-byte unchanged (default voiceVolume == 1.0 anyway).
-        let voiceGain: Float = isSpokenTable(atState.voices[vi].table) ? Float(atVoiceVolume) : 1.0
+        // Per-channel gain — the ONLY place muting takes effect. Spoken tokens (numbers/syllables) are
+        // scaled by the voice volume and gated by the voice mute; clicks are gated by the click mute. When
+        // a channel is on its gain is exactly `1.0` (clicks) or the voice volume — literally the previous
+        // expression — so the sample-accurate click path is byte-for-byte unchanged and the accuracy suites
+        // (which never mute) render identical samples. A muted channel is a gain of 0: the buffer still
+        // mixes (as silence), the playhead still advances, and nothing about the schedule changes.
+        let voiceGain: Float = isSpokenTable(atState.voices[vi].table)
+            ? (atVoiceMuted ? 0 : Float(atVoiceVolume))
+            : (atClickMuted ? 0 : 1.0)
 
         // Hard-cut path (Voice mode only): mix up to the cut with a short declick, then stop this token —
         // it is being replaced by the next count. Wholly separate so the default path below stays exact.
