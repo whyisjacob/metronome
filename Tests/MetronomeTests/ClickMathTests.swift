@@ -149,20 +149,21 @@ final class ClickMathTests: XCTestCase {
     }
 
     func testCompoundMetersDefaultToGroupHeadAccents() {
-        // Compound meters are felt in dotted-quarter beats: beat 1 strong, every later group head medium.
-        // The accent array is one entry per MAIN beat (2 for 6/8, 3 for 9/8, 4 for 12/8).
+        // Compound meters are felt in dotted-quarter beats. 6/8 & 9/8 accent every later group head medium;
+        // 12/8 is a compound 4/4 — the secondary is the THIRD beat, not a flat run of mediums. The accent
+        // array is one entry per MAIN beat (2 for 6/8, 3 for 9/8, 4 for 12/8).
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 8)).accents,
                        [.strong, .medium])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 9, denominator: 8)).accents,
                        [.strong, .medium, .medium])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 12, denominator: 8)).accents,
-                       [.strong, .medium, .medium, .medium])
-        // Simple meters: 4/4 keeps its 2+2 (strong, _, medium, _); 6/4 is duple-simple (downbeat only);
+                       [.strong, .normal, .medium, .normal])   // compound 4/4: secondary on beat 3
+        // Simple meters: 4/4 keeps its 2+2 (strong, _, medium, _); 6/4 is felt in two → secondary on beat 4;
         // 3/8 is a single group (downbeat only), NOT compound.
         XCTAssertEqual(MetronomeConfiguration(timeSignature: .common).accents,
                        [.strong, .normal, .medium, .normal])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 4)).accents,
-                       [.strong, .normal, .normal, .normal, .normal, .normal])
+                       [.strong, .normal, .normal, .medium, .normal, .normal])   // felt in two: secondary on beat 4
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 3, denominator: 8)).accents,
                        [.strong, .normal, .normal])
     }
