@@ -22,7 +22,7 @@ struct SubdivisionControlView: View {
                         VStack(spacing: 2) {
                             Text(option.symbol)
                                 .font(.system(size: 20, weight: .bold))
-                            Text(isCompound ? option.compoundDisplayName : option.displayName)
+                            Text(option.displayName(in: viewModel.timeSignature))
                                 .font(.system(size: 11, weight: .semibold))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)

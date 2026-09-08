@@ -54,13 +54,16 @@ struct TimeSignature: Equatable, Hashable, Codable {
         case (5, 8):  return [2, 3]        // 5/8 → accents on 1, 3
         case (5, _):  return [3, 2]        // 5/4 → accents on 1, 4
         case (7, 8):  return [2, 2, 3]     // 7/8 → accents on 1, 3, 5
+        case (6, 4):  return [3, 3]        // 6/4 felt in two → secondary (medium) accent on beat 4
         default:      return [max(beatsPerBar, 1)]   // single group: downbeat only
         }
     }
 
     /// The sensible default accent pattern for this meter, one `BeatAccent` per **main beat**:
-    ///   * Compound (6/8, 9/8, 12/8): every dotted-quarter beat is a group head — beat 1 `strong`, the
-    ///     rest `medium` (so 12/8 is 1-strong, 4/7/10-medium in eighth terms).
+    ///   * Compound duple/triple (6/8, 9/8): every dotted-quarter beat is a group head — beat 1 `strong`,
+    ///     the rest `medium` (6/8 → `[strong, medium]`, 9/8 → `[strong, medium, medium]`).
+    ///   * Compound quadruple (12/8): a compound 4/4 — beat 1 `strong`, the THIRD dotted-quarter beat the
+    ///     mid-bar secondary (`medium`), beats 2 & 4 `normal` → `[strong, normal, medium, normal]`.
     ///   * Simple: the downbeat is `strong`, each subsequent group head (per `defaultGrouping`) is
     ///     `medium`, and every other beat is `normal`.
     /// Always `beatsPerBar` long with beat 1 accented, so it drops straight into `MetronomeConfiguration`.
@@ -70,7 +73,14 @@ struct TimeSignature: Equatable, Hashable, Codable {
         guard !pattern.isEmpty else { return pattern }
         pattern[0] = .strong
         if isCompound {
-            for i in 1..<count { pattern[i] = .medium }
+            if count == 4 {
+                // 12/8 is a compound 4/4: the mid-bar secondary accent is the THIRD dotted-quarter beat;
+                // beats 2 & 4 stay `normal`. (6/8 → [strong, medium] and 9/8 → [strong, medium, medium]
+                // keep the every-group-head rule in the else branch.)
+                pattern[2] = .medium
+            } else {
+                for i in 1..<count { pattern[i] = .medium }
+            }
         } else {
             var index = 0
             for size in defaultGrouping {

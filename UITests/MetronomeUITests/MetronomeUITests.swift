@@ -4,7 +4,8 @@ import XCTest
 /// captures a full-screen screenshot of each key screen as a `.keepAlways` `XCTAttachment`. CI
 /// (`.github/workflows/screenshots.yml`) then extracts those attachments from the `.xcresult` into
 /// downloadable PNGs — the whole point being to let a Windows-only owner *see* the rendered app, at the
-/// exact App Store 6.9" pixel size, without a Mac.
+/// exact App Store iPhone screenshot sizes (the workflow captures both the 6.5" 1284×2778 and 6.9"
+/// 1320×2868 classes), without a Mac.
 ///
 /// Design notes:
 ///  - **Non-asserting on navigation:** every step is guarded with `waitForExistence` and simply skipped
@@ -103,7 +104,8 @@ final class MetronomeUITests: XCTestCase {
     }
 
     /// Captures the whole screen and attaches it, kept regardless of test outcome so CI can extract it as a
-    /// PNG at the device's native pixel size (iPhone 16 Pro Max = 1320 × 2868, an accepted App Store 6.9").
+    /// PNG at the device's native pixel size (the workflow runs this on a 6.5" device → 1284 × 2778 and a
+    /// 6.9" device → 1320 × 2868, both accepted App Store iPhone sizes).
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name

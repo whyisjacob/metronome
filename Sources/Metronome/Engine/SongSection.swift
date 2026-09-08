@@ -159,7 +159,7 @@ struct SongSection: Identifiable, Equatable, Codable {
 
     // MARK: - Display helpers
 
-    var meterAndFeel: String { "\(timeSignature.displayString) · \(subdivision.displayName)" }
+    var meterAndFeel: String { "\(timeSignature.displayString) · \(subdivision.displayName(in: timeSignature))" }
     var barsSummary: String { repeatCount > 1 ? "\(bars) bars ×\(repeatCount)" : "\(bars) bar\(bars == 1 ? "" : "s")" }
     var tempoSummary: String { "\(Int(tempoBPM.rounded())) BPM" }
 }

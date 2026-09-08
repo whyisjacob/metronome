@@ -1,18 +1,24 @@
 name: UI screenshots
 
-# Boots an iOS Simulator in CI, runs the XCUITest that walks the real SwiftUI screens, extracts the
-# screenshot attachments from the .xcresult, and uploads them as a downloadable `ui-screenshots`
-# artifact — so the Windows-only owner can SEE the rendered app, at the exact App Store screenshot size,
-# without a Mac.
+# Boots iOS Simulators in CI, runs the XCUITest that walks the real SwiftUI screens, extracts the
+# screenshot attachments from each .xcresult, and uploads them as a downloadable `ui-screenshots`
+# artifact — so the Windows-only owner can SEE the rendered app at the exact App Store screenshot
+# sizes, without a Mac.
+#
+# Produces BOTH iPhone screenshot sizes App Store Connect accepts, in clearly-named subfolders:
+#   * 6.5-inch_1284x2778  (iPhone 14 Plus / 13 Pro Max / 12 Pro Max — the 428×926 pt @3x class)
+#   * 6.9-inch_1320x2868  (iPhone 16 Pro Max — the 440×956 pt @3x class)
+# ASC presents one iPhone slot whose accepted size varies by account/state; the 6.5" set is the one
+# that unblocked this submission (ASC rejected a 6.9"-only upload, asking for 1284×2778 / 1242×2688).
+# Shipping both lets the owner fill whichever slot ASC shows.
 #
 # This is a SEPARATE workflow/scheme from ios.yml on purpose: the unit-test CI keeps running only the
 # fast headless accuracy/unit suite (scheme `Metronome`); this runs only the UI tests (scheme
 # `MetronomeUITests`).
 #
 # Manual by design (`workflow_dispatch`): screenshots are an on-demand marketing artifact, not a
-# per-commit gate, so this does not run on every push. Trigger it from the Actions tab or with:
+# per-commit gate. Trigger it from the Actions tab or with:
 #   gh workflow run screenshots.yml -R whyisjacob/metronome --ref main
-# (To also regenerate on every push, add `push:` to the `on:` block below.)
 
 on:
   workflow_dispatch:
@@ -23,7 +29,7 @@ concurrency:
 
 jobs:
   ui-screenshots:
-    name: Capture UI screenshots (iPhone 16 Pro Max, 6.9")
+    name: Capture UI screenshots (6.5" 1284x2778 + 6.9" 1320x2868)
     runs-on: macos-latest
 
     steps:
@@ -48,20 +54,42 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # Pin the capture device to the iPhone 16 Pro Max (6.9") so the produced PNGs match the App Store's
-      # required 6.9" screenshot size (1320 × 2868 px portrait). Find that exact simulator on the runner;
-      # if the image doesn't already have one instantiated, create it from its device type + the newest
-      # available iOS runtime. Fail loudly if it genuinely can't be obtained — capturing on some other
-      # device (the old behaviour) would silently produce wrong-sized screenshots.
-      - name: Resolve iPhone 16 Pro Max (6.9") simulator
+      # Evidence for the device choices below: dump every available simulator plus the Pro Max / Plus
+      # device types and runtimes the runner image actually ships, so the picks are auditable from the log.
+      - name: List available simulators (evidence for device choice)
+        run: |
+          echo "==== simctl devices available ===="
+          xcrun simctl list devices available
+          echo "==== device types (Pro Max / Plus) ===="
+          xcrun simctl list devicetypes | grep -Ei "Pro Max|Plus" || true
+          echo "==== runtimes ===="
+          xcrun simctl list runtimes
+
+      # Resolve one simulator per App Store size class. Each size has a PRIORITY LIST of devices that ALL
+      # produce that exact pixel size; we take the first the runner can find or create. If NONE of a size's
+      # candidates can be obtained we FAIL LOUDLY (exit 1) rather than fall back to a differently-sized
+      # device — capturing at a wrong size is exactly the bug this workflow exists to prevent.
+      - name: Resolve simulators (6.5" and 6.9")
         id: sim
         run: |
-          DEVICE_NAME="iPhone 16 Pro Max"
+          set -uo pipefail
 
-          find_udid() {
+          newest_runtime() {
+            xcrun simctl list runtimes --json | python3 -c "
+          import json,sys,re
+          rts=[r for r in json.load(sys.stdin)['runtimes'] if r.get('isAvailable') and 'iOS' in r.get('name','')]
+          def ver(r):
+              m=re.search(r'(\d+)\.(\d+)', r.get('version',''))
+              return (int(m.group(1)),int(m.group(2))) if m else (0,0)
+          rts.sort(key=ver)
+          print(rts[-1]['identifier'] if rts else '')
+          "
+          }
+
+          udid_for_name() {   # echoes a UDID for an available device with this exact name, or nothing
             xcrun simctl list devices available --json | python3 -c "
           import json,sys
-          name='$DEVICE_NAME'
+          name='$1'
           d=json.load(sys.stdin)['devices']
           for runtime,devs in d.items():
               if 'iOS' not in runtime: continue
@@ -71,73 +99,115 @@ jobs:
           "
           }
 
-          UDID="$(find_udid)"
-          if [ -z "$UDID" ]; then
-            echo "No existing '$DEVICE_NAME' simulator; creating one."
-            DT=$(xcrun simctl list devicetypes --json | python3 -c "
+          devicetype_for_name() {   # echoes the device-type identifier for this exact name, or nothing
+            xcrun simctl list devicetypes --json | python3 -c "
           import json,sys
-          name='$DEVICE_NAME'
+          name='$1'
           for dt in json.load(sys.stdin)['devicetypes']:
               if dt.get('name')==name:
                   print(dt['identifier']); sys.exit(0)
-          ")
-            RT=$(xcrun simctl list runtimes --json | python3 -c "
-          import json,sys,re
-          rts=[r for r in json.load(sys.stdin)['runtimes'] if r.get('isAvailable') and 'iOS' in r.get('name','')]
-          def ver(r):
-              m=re.search(r'(\d+)\.(\d+)', r.get('version',''))
-              return (int(m.group(1)),int(m.group(2))) if m else (0,0)
-          rts.sort(key=ver)
-          print(rts[-1]['identifier'] if rts else '')
-          ")
-            if [ -z "$DT" ] || [ -z "$RT" ]; then
-              echo "::error::Cannot obtain '$DEVICE_NAME' (device type or iOS runtime unavailable on this runner image)."
-              echo "Device types containing 'Pro Max':"; xcrun simctl list devicetypes | grep -i "Pro Max" || true
-              exit 1
-            fi
-            UDID=$(xcrun simctl create "$DEVICE_NAME" "$DT" "$RT")
-          fi
+          "
+          }
 
-          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          echo "Using $DEVICE_NAME  [$UDID]"
+          RT="$(newest_runtime)"
 
-      - name: Boot simulator
+          resolve() {   # resolve <label> <candidate names...> -> echoes UDID on stdout, or exits 1
+            label="$1"; shift
+            for name in "$@"; do
+              u="$(udid_for_name "$name" || true)"
+              if [ -n "$u" ]; then
+                echo ">> $label: using existing '$name' [$u]" 1>&2
+                echo "$u"; return 0
+              fi
+              dt="$(devicetype_for_name "$name" || true)"
+              if [ -n "$dt" ] && [ -n "$RT" ]; then
+                u="$(xcrun simctl create "$name" "$dt" "$RT" || true)"
+                if [ -n "$u" ]; then
+                  echo ">> $label: created '$name' [$u] on $RT" 1>&2
+                  echo "$u"; return 0
+                fi
+              fi
+              echo ">> $label: '$name' unavailable (no existing device, no creatable device type), trying next" 1>&2
+            done
+            echo "::error::No $label simulator available on this runner (tried: $*). Refusing to capture at a wrong size." 1>&2
+            return 1
+          }
+
+          U65="$(resolve '6.5-inch (1284x2778)' 'iPhone 14 Plus' 'iPhone 13 Pro Max' 'iPhone 12 Pro Max')" || exit 1
+          U69="$(resolve '6.9-inch (1320x2868)' 'iPhone 16 Pro Max')" || exit 1
+
+          echo "udid_65=$U65" >> "$GITHUB_OUTPUT"
+          echo "udid_69=$U69" >> "$GITHUB_OUTPUT"
+          echo "Resolved  6.5\"=$U65   6.9\"=$U69"
+
+      - name: Boot simulators
         run: |
-          xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
-          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b || true
-          # Clean, deterministic status bar for nicer marketing screenshots (best-effort).
-          xcrun simctl status_bar "${{ steps.sim.outputs.udid }}" override \
-            --time "9:41" --batteryState charged --batteryLevel 100 \
-            --cellularBars 4 --wifiBars 3 || true
-
-      - name: Run UI tests (capture screenshots)
-        run: |
-          set -o pipefail
-          xcodebuild test \
-            -scheme MetronomeUITests \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            -resultBundlePath TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO | tee xcodebuild-ui.log
-
-      - name: Extract screenshots from the .xcresult (and report pixel sizes)
-        if: always()
-        id: extract
-        run: |
-          mkdir -p screenshots
-          # Primary path: xcparse pulls every image attachment (our .keepAlways screenshots) as PNGs.
-          xcparse screenshots --test TestResults.xcresult screenshots/ || true
-          echo "---- extracted files ----"
-          find screenshots -type f | sort || true
-          echo "---- pixel dimensions (App Store 6.9\" wants 1320x2868 or 1290x2796, portrait) ----"
-          # `sips` is a macOS built-in; print WxH for each PNG so the run log records the exact size.
-          find screenshots -type f -name '*.png' | sort | while read -r f; do
-            W=$(sips -g pixelWidth  "$f" | awk '/pixelWidth/{print $2}')
-            H=$(sips -g pixelHeight "$f" | awk '/pixelHeight/{print $2}')
-            echo "DIMS  ${W}x${H}  $f"
+          for u in "${{ steps.sim.outputs.udid_65 }}" "${{ steps.sim.outputs.udid_69 }}"; do
+            xcrun simctl boot "$u" || true
+            xcrun simctl bootstatus "$u" -b || true
+            # Clean, deterministic status bar for nicer marketing screenshots (best-effort).
+            xcrun simctl status_bar "$u" override \
+              --time "9:41" --batteryState charged --batteryLevel 100 \
+              --cellularBars 4 --wifiBars 3 || true
           done
-          PNGS=$(find screenshots -type f -name '*.png' | wc -l | tr -d ' ')
-          echo "PNG count: $PNGS"
-          echo "png_count=$PNGS" >> "$GITHUB_OUTPUT"
+
+      # Capture on each device into its own size-labelled subfolder, then MEASURE every produced PNG with
+      # `sips` (a macOS built-in) and FAIL if any is not the expected pixel size or if none were produced.
+      # Both sizes are attempted regardless of the other's outcome; the step still fails loudly at the end
+      # if either had a problem (6.5" is attempted first — it's the slot that blocks submission).
+      - name: Capture + verify both sizes
+        id: capture
+        run: |
+          set -uo pipefail
+          FAIL=0
+
+          capture() {   # capture <udid> <outdir> <W> <H> <xcresult>
+            udid="$1"; outdir="$2"; W="$3"; H="$4"; xcr="$5"
+            echo "==================  Capturing ${W}x${H} → $outdir  =================="
+            mkdir -p "$outdir"
+            xcodebuild test \
+              -scheme MetronomeUITests \
+              -destination "id=$udid" \
+              -resultBundlePath "$xcr" \
+              CODE_SIGNING_ALLOWED=NO 2>&1 | tee "xcodebuild-${W}x${H}.log" || true
+
+            # Primary path: xcparse pulls every image attachment (our .keepAlways screenshots) as PNGs.
+            xcparse screenshots --test "$xcr" "$outdir/" || true
+
+            echo "---- $outdir pixel dimensions (want ${W}x${H} portrait) ----"
+            pngs=0; bad=0
+            while IFS= read -r f; do
+              pngs=$((pngs+1))
+              w=$(sips -g pixelWidth  "$f" | awk '/pixelWidth/{print $2}')
+              h=$(sips -g pixelHeight "$f" | awk '/pixelHeight/{print $2}')
+              echo "DIMS  ${w}x${h}  $f"
+              # Accept the exact size in portrait OR (defensively) its landscape transpose.
+              if { [ "$w" = "$W" ] && [ "$h" = "$H" ]; } || { [ "$w" = "$H" ] && [ "$h" = "$W" ]; }; then
+                :
+              else
+                echo "::error::$f is ${w}x${h}, expected ${W}x${H}"; bad=$((bad+1))
+              fi
+            done < <(find "$outdir" -type f -name '*.png' | sort)
+
+            if [ "$pngs" -eq 0 ]; then
+              echo "::error::No screenshots were extracted for ${W}x${H} (build/UITest or extraction failed)."
+              return 1
+            fi
+            if [ "$bad" -ne 0 ]; then
+              echo "::error::${bad} of ${pngs} screenshot(s) are the WRONG size for the ${W}x${H} set."
+              return 1
+            fi
+            echo "OK: ${pngs} screenshot(s), all ${W}x${H}."
+            return 0
+          }
+
+          # 6.5" FIRST — this is the App Store slot that is blocking submission.
+          capture "${{ steps.sim.outputs.udid_65 }}" "screenshots/6.5-inch_1284x2778" 1284 2778 "TestResults-65.xcresult" || FAIL=1
+          capture "${{ steps.sim.outputs.udid_69 }}" "screenshots/6.9-inch_1320x2868" 1320 2868 "TestResults-69.xcresult" || FAIL=1
+
+          echo "==== summary ===="
+          find screenshots -type f -name '*.png' | sort || true
+          exit $FAIL
 
       - name: Upload screenshots artifact
         if: always()
@@ -148,15 +218,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      # Raw result bundle + build log, kept short-term as a debugging aid if extraction ever yields
+      # Raw result bundles + build logs, kept short-term as a debugging aid if extraction ever yields
       # nothing.
-      - name: Upload xcresult bundle (debug)
+      - name: Upload xcresult bundles (debug)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: xcresult-bundle
+          name: xcresult-bundles
           path: |
-            TestResults.xcresult
-            xcodebuild-ui.log
+            TestResults-65.xcresult
+            TestResults-69.xcresult
+            xcodebuild-*.log
           if-no-files-found: ignore
           retention-days: 7

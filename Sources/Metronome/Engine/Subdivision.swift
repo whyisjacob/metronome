@@ -75,6 +75,10 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
         }
     }
 
+    /// The bare note-value name **assuming the beat is a quarter note** — literally correct only in ×/4
+    /// meters. Kept for internal use and the accuracy-test failure labels; for anything shown to the user
+    /// prefer `displayName(in:)` (see the extension below), which derives the true note value from the
+    /// meter's actual beat unit (a half note in ×/2, an eighth in ×/8, a dotted quarter in compound).
     var displayName: String {
         switch self {
         case .quarter:      return "Quarter"
@@ -99,6 +103,69 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
         case .sextuplet:    return "⁶"
         case .septuplet:    return "⁷"
         case .thirtysecond: return "³²"
+        }
+    }
+}
+
+extension Subdivision {
+    /// The musically-truthful label for this subdivision **in the context of `signature`**.
+    ///
+    /// `Subdivision` is really *clicks-per-beat* (1, 2, 3, 4, …), so the note value each click represents
+    /// depends on what the beat is: the **denominator note** in a simple meter (a half in ×/2, a quarter in
+    /// ×/4, an eighth in ×/8), a **dotted quarter** in a compound meter (6/8, 9/8, 12/8). The bare
+    /// `displayName` (Quarter/Eighth/…) is only literally true when the beat is a quarter. This derives the
+    /// real note value from `beat unit ÷ clicks-per-beat`, so the label always tells the musical truth —
+    /// e.g. in 4/2 "one click per beat" is a **Half** note (not a Quarter); in 3/8 it is an **Eighth**.
+    func displayName(in signature: TimeSignature) -> String {
+        // Compound meters (6/8, 9/8, 12/8): the beat is a dotted quarter and `compoundDisplayName` already
+        // tells the truth (Main beat / Eighths / Sixteenths). Keep that behaviour, don't regress it.
+        guard !signature.isCompound else { return compoundDisplayName }
+
+        // Simple meter: the beat is the denominator note (2 → half, 4 → quarter, 8 → eighth, 16 → 16th).
+        let beatDenominator = signature.denominator
+        switch self {
+        case .quarter, .eighth, .sixteenth, .thirtysecond:
+            // Even (binary) divisions: each click is a 1/(beatDenominator × clicksPerBeat) note.
+            return Subdivision.cleanNoteName(beatDenominator * ticksPerBeat)
+                ?? Subdivision.beatFractionLabel(ticksPerBeat)
+        case .triplet:
+            // Three in the space of one beat: each member is drawn as the note that would give two per
+            // beat — an eighth-note triplet in ×/4, a quarter-note triplet in ×/2, a 16th triplet in ×/8.
+            if let member = Subdivision.cleanNoteName(beatDenominator * 2) { return "\(member) triplet" }
+            return "\(Subdivision.beatFractionLabel(3)) (triplet)"
+        case .quintuplet, .sextuplet, .septuplet:
+            // Higher tuplets are named by their count (N per beat) — already beat-relative and true in any
+            // meter; a single note value for a 5/6/7-tuplet would be ambiguous.
+            return displayName
+        }
+    }
+
+    /// A clean, common note-value name for a `1/den`-of-a-whole note, or `nil` past a 32nd (a 64th/128th is
+    /// deliberately *not* named here — those very deep subdivisions fall back to a beat-relative label).
+    private static func cleanNoteName(_ den: Int) -> String? {
+        switch den {
+        case 1:  return "Whole"
+        case 2:  return "Half"
+        case 4:  return "Quarter"
+        case 8:  return "Eighth"
+        case 16: return "Sixteenth"
+        case 32: return "32nd"
+        default: return nil
+        }
+    }
+
+    /// A beat-relative label for a click with no clean note name (very deep subdivisions), e.g. "½ beat".
+    private static func beatFractionLabel(_ clicksPerBeat: Int) -> String {
+        switch clicksPerBeat {
+        case 1:  return "1 beat"
+        case 2:  return "½ beat"
+        case 3:  return "⅓ beat"
+        case 4:  return "¼ beat"
+        case 5:  return "⅕ beat"
+        case 6:  return "⅙ beat"
+        case 7:  return "1/7 beat"
+        case 8:  return "⅛ beat"
+        default: return "1/\(clicksPerBeat) beat"
         }
     }
 }

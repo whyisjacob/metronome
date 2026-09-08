@@ -36,7 +36,7 @@ struct GrooveControlView: View {
             Image(systemName: "music.note")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.textSecondary)
-            Text("Current grid: \(viewModel.subdivision.displayName) notes")
+            Text("Current grid: \(viewModel.subdivision.displayName(in: viewModel.timeSignature))")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 0)
