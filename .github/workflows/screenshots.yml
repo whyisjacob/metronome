@@ -1,9 +1,11 @@
 name: UI screenshots
 
 # Boots iOS Simulators in CI, runs the XCUITest that walks the real SwiftUI screens, extracts the
-# screenshot attachments from each .xcresult, and uploads them as a downloadable `ui-screenshots`
-# artifact — so the Windows-only owner can SEE the rendered app at the exact App Store screenshot
-# sizes, without a Mac.
+# screenshot attachments from each .xcresult, COMPOSITES each into a styled App Store marketing image
+# (on-brand near-black background + gold headline + rounded device with a soft drop shadow), and uploads
+# both the raw captures and the marketing images as a downloadable `ui-screenshots` artifact — so the
+# Windows-only owner can SEE the rendered app, and ship the marketing set, at the exact App Store
+# screenshot sizes, without a Mac. Each size folder holds `raw/` (unstyled fallback) + `marketing/`.
 #
 # Produces BOTH iPhone screenshot sizes App Store Connect accepts, in clearly-named subfolders:
 #   * 6.5-inch_1284x2778  (iPhone 14 Plus / 13 Pro Max / 12 Pro Max — the 428×926 pt @3x class)
@@ -44,12 +46,18 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Install XcodeGen + xcparse
+      - name: Install XcodeGen + xcparse + Pillow
         run: |
           brew install xcodegen
           # xcparse extracts XCTAttachment images (our screenshots) out of the .xcresult as PNGs.
           brew install chargepoint/xcparse/xcparse
           xcparse version || true
+          # Pillow (in a venv, to sidestep PEP 668 "externally-managed" pip) composites the raw captures
+          # into styled App Store marketing images via scripts/marketing_frame.py.
+          python3 -m venv "$RUNNER_TEMP/mktvenv"
+          "$RUNNER_TEMP/mktvenv/bin/python" -m pip install --upgrade pip >/dev/null
+          "$RUNNER_TEMP/mktvenv/bin/python" -m pip install Pillow
+          "$RUNNER_TEMP/mktvenv/bin/python" -c "import PIL; print('Pillow', PIL.__version__)"
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -151,53 +159,96 @@ jobs:
               --cellularBars 4 --wifiBars 3 || true
           done
 
-      # Capture on each device into its own size-labelled subfolder, then MEASURE every produced PNG with
-      # `sips` (a macOS built-in) and FAIL if any is not the expected pixel size or if none were produced.
-      # Both sizes are attempted regardless of the other's outcome; the step still fails loudly at the end
-      # if either had a problem (6.5" is attempted first — it's the slot that blocks submission).
-      - name: Capture + verify both sizes
+      # Capture on each device, keep the RAW captures in `<size>/raw/`, then COMPOSITE each into a styled
+      # App Store MARKETING image in `<size>/marketing/` (on-brand near-black background + gold headline +
+      # rounded device with a soft drop shadow). Every produced PNG is MEASURED with `sips` (a macOS
+      # built-in): raws are checked, and the marketing images — the deliverable — must be EXACTLY the target
+      # pixel size or the step FAILS LOUDLY. No silent wrong-size or unstyled output escapes. Both sizes are
+      # attempted regardless of the other's outcome (6.5" first — it's the slot that blocks submission).
+      - name: Capture + composite marketing + verify both sizes
         id: capture
         run: |
           set -uo pipefail
           FAIL=0
 
-          capture() {   # capture <udid> <outdir> <W> <H> <xcresult>
-            udid="$1"; outdir="$2"; W="$3"; H="$4"; xcr="$5"
-            echo "==================  Capturing ${W}x${H} → $outdir  =================="
-            mkdir -p "$outdir"
+          # Prioritised caption fonts — scripts/marketing_frame.py picks the first Pillow can actually open.
+          # Prefer the app's on-brand rounded face, then SF Pro, then a guaranteed-present static bold, then
+          # Helvetica. (The script fails loudly if none load.)
+          FONTS="/System/Library/Fonts/SFNSRounded.ttf,/System/Library/Fonts/SFNSRounded.otf,/System/Library/Fonts/SFNS.ttf,/System/Library/Fonts/Supplemental/Arial Bold.ttf,/System/Library/Fonts/Helvetica.ttc"
+          PYBIN="$RUNNER_TEMP/mktvenv/bin/python"
+
+          # Benefit-led, musician-facing headline per screen. TRUE to the app — no fabricated features.
+          caption_for() {
+            case "$1" in
+              01*) printf 'Sample-accurate.\nEvery single beat.' ;;
+              02*) printf 'Any meter.\nAny subdivision.' ;;
+              03*) printf 'It counts out loud —\n1 e & a.' ;;
+              04*) printf 'Build the whole song,\nsection by section.' ;;
+              05*) printf 'Practice in silence.' ;;
+              *)   printf '' ;;
+            esac
+          }
+
+          # verify_dims <dir> <W> <H> <exact|either> — echoes DIMS, returns 1 on any wrong size / none found
+          verify_dims() {
+            local dir="$1" W="$2" H="$3" mode="$4" pngs=0 bad=0 f w h
+            while IFS= read -r f; do
+              pngs=$((pngs+1))
+              w=$(sips -g pixelWidth  "$f" | awk '/pixelWidth/{print $2}')
+              h=$(sips -g pixelHeight "$f" | awk '/pixelHeight/{print $2}')
+              echo "DIMS  ${w}x${h}  $f"
+              if [ "$mode" = "either" ]; then
+                { [ "$w" = "$W" ] && [ "$h" = "$H" ]; } || { [ "$w" = "$H" ] && [ "$h" = "$W" ]; } \
+                  || { echo "::error::$f is ${w}x${h}, expected ${W}x${H}"; bad=$((bad+1)); }
+              else
+                { [ "$w" = "$W" ] && [ "$h" = "$H" ]; } \
+                  || { echo "::error::$f is ${w}x${h}, expected EXACTLY ${W}x${H}"; bad=$((bad+1)); }
+              fi
+            done < <(find "$dir" -type f -name '*.png' | sort)
+            if [ "$pngs" -eq 0 ]; then echo "::error::No PNGs in $dir"; return 1; fi
+            if [ "$bad" -ne 0 ]; then echo "::error::${bad}/${pngs} PNG(s) wrong size in $dir"; return 1; fi
+            echo "OK: ${pngs} PNG(s) in $dir, all correct."
+            return 0
+          }
+
+          capture() {   # capture <udid> <sizedir> <W> <H> <xcresult>
+            local udid="$1" sizedir="$2" W="$3" H="$4" xcr="$5"
+            local rawdir="$sizedir/raw" mktdir="$sizedir/marketing"
+            echo "==================  Capturing ${W}x${H} → $sizedir  =================="
+            mkdir -p "$rawdir" "$mktdir"
             xcodebuild test \
               -scheme MetronomeUITests \
               -destination "id=$udid" \
               -resultBundlePath "$xcr" \
               CODE_SIGNING_ALLOWED=NO 2>&1 | tee "xcodebuild-${W}x${H}.log" || true
 
-            # Primary path: xcparse pulls every image attachment (our .keepAlways screenshots) as PNGs.
-            xcparse screenshots --test "$xcr" "$outdir/" || true
+            # Raw captures (our .keepAlways attachments) → raw/.
+            xcparse screenshots --test "$xcr" "$rawdir/" || true
 
-            echo "---- $outdir pixel dimensions (want ${W}x${H} portrait) ----"
-            pngs=0; bad=0
+            echo "---- RAW $rawdir (want ${W}x${H}) ----"
+            verify_dims "$rawdir" "$W" "$H" "either" || return 1
+
+            # Composite every raw into a styled marketing PNG (scripts/marketing_frame.py, Pillow).
+            local made=0 f base prefix cap out
             while IFS= read -r f; do
-              pngs=$((pngs+1))
-              w=$(sips -g pixelWidth  "$f" | awk '/pixelWidth/{print $2}')
-              h=$(sips -g pixelHeight "$f" | awk '/pixelHeight/{print $2}')
-              echo "DIMS  ${w}x${h}  $f"
-              # Accept the exact size in portrait OR (defensively) its landscape transpose.
-              if { [ "$w" = "$W" ] && [ "$h" = "$H" ]; } || { [ "$w" = "$H" ] && [ "$h" = "$W" ]; }; then
-                :
-              else
-                echo "::error::$f is ${w}x${h}, expected ${W}x${H}"; bad=$((bad+1))
-              fi
-            done < <(find "$outdir" -type f -name '*.png' | sort)
+              base=$(basename "$f")          # NN-Name_<idx>_<UUID>.png
+              prefix="${base%%_*}"           # NN-Name
+              cap="$(caption_for "$prefix")"
+              if [ -z "$cap" ]; then echo "note: no caption mapped for '$prefix' — skipping"; continue; fi
+              out="$mktdir/${prefix}.png"
+              "$PYBIN" scripts/marketing_frame.py \
+                --raw "$f" --out "$out" --width "$W" --height "$H" \
+                --caption "$cap" --fonts "$FONTS" \
+                || { echo "::error::compositing failed for $f"; return 1; }
+              echo "styled  $out   «$(printf '%s' "$cap" | tr '\n' ' ')»"
+              made=$((made+1))
+            done < <(find "$rawdir" -type f -name '*.png' | sort)
+            if [ "$made" -eq 0 ]; then echo "::error::No marketing images produced for ${W}x${H}."; return 1; fi
 
-            if [ "$pngs" -eq 0 ]; then
-              echo "::error::No screenshots were extracted for ${W}x${H} (build/UITest or extraction failed)."
-              return 1
-            fi
-            if [ "$bad" -ne 0 ]; then
-              echo "::error::${bad} of ${pngs} screenshot(s) are the WRONG size for the ${W}x${H} set."
-              return 1
-            fi
-            echo "OK: ${pngs} screenshot(s), all ${W}x${H}."
+            echo "---- MARKETING $mktdir (must be EXACTLY ${W}x${H}) ----"
+            verify_dims "$mktdir" "$W" "$H" "exact" || return 1
+
+            echo "OK: ${made} marketing screenshot(s) for ${W}x${H}, all exact size."
             return 0
           }
 
@@ -205,7 +256,7 @@ jobs:
           capture "${{ steps.sim.outputs.udid_65 }}" "screenshots/6.5-inch_1284x2778" 1284 2778 "TestResults-65.xcresult" || FAIL=1
           capture "${{ steps.sim.outputs.udid_69 }}" "screenshots/6.9-inch_1320x2868" 1320 2868 "TestResults-69.xcresult" || FAIL=1
 
-          echo "==== summary ===="
+          echo "==== summary (marketing = the deliverable) ===="
           find screenshots -type f -name '*.png' | sort || true
           exit $FAIL
 
