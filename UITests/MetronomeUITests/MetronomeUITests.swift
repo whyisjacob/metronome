@@ -34,9 +34,9 @@ final class MetronomeUITests: XCTestCase {
 
     func testCaptureKeyScreens() throws {
         // (01) Main metronome screen — the default (first) tab on launch: the "MAELZEL" header, the beat
-        //      visual, tempo, and Start, with the mute / silent-practice presets directly BELOW Start (a
-        //      practice modifier under the primary transport). Ignore the wait result: if the marker never
-        //      appears we still snapshot whatever rendered, so the artifact is never empty.
+        //      visual, tempo, and Start. (Silent practice now lives in Settings; the main screen shows only
+        //      a tiny "Silent" tag under Start when audio is muted.) Ignore the wait result: if the marker
+        //      never appears we still snapshot whatever rendered, so the artifact is never empty.
         _ = app.staticTexts["MAELZEL"].waitForExistence(timeout: 30)
         capture("01-Metronome-Main")
 

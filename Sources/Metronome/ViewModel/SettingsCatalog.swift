@@ -16,9 +16,9 @@ enum AppControl: String, CaseIterable {
     case beatVisual         // the on-screen beat indicator
     case sound              // click timbre + Voice mode — reached often, so it lives on the main screen
     case countIn            // pickup / count-in: a lead-in before the first downbeat — a primary control
-    case silentPractice     // mute: click/voice/visual channels + Full/Count/Flash presets — hit mid-practice
 
     // Everything else — consolidated into the single collapsible Settings screen.
+    case silentPractice     // mute: click/voice/visual channels + Full/Count/Flash presets — a mode set occasionally, so it lives in Settings (not more important than tempo/meter)
     case sectionBuilder     // entry point to the section / tempo-map builder (saves into the Songs library)
     case voiceCounting      // Voice: speak subdivisions aloud
     case voiceVolume        // Voice: spoken volume (independent of the click volume)
@@ -36,6 +36,7 @@ enum AppControl: String, CaseIterable {
 enum SettingsSection: String, CaseIterable, Identifiable {
     case sections
     case voice
+    case silentPractice
     case groove
     case accents
     case visuals
@@ -47,28 +48,30 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .sections:    return "Sections"
-        case .voice:       return "Voice"
-        case .groove:      return "Groove"
-        case .accents:     return "Accents"
-        case .visuals:     return "Visuals"
-        case .borderFlash: return "Border flash"
-        case .gapTrainer:  return "Gap trainer"
-        case .recents:     return "Recents"
+        case .sections:       return "Sections"
+        case .voice:          return "Voice"
+        case .silentPractice: return "Silent practice"
+        case .groove:         return "Groove"
+        case .accents:        return "Accents"
+        case .visuals:        return "Visuals"
+        case .borderFlash:    return "Border flash"
+        case .gapTrainer:     return "Gap trainer"
+        case .recents:        return "Recents"
         }
     }
 
     /// SF Symbol shown on the section header.
     var systemImage: String {
         switch self {
-        case .sections:    return "rectangle.stack.badge.plus"
-        case .voice:       return "person.wave.2.fill"
-        case .groove:      return "waveform.path"
-        case .accents:     return "chart.bar.fill"
-        case .visuals:     return "circle.circle.fill"
-        case .borderFlash: return "rectangle.inset.filled.and.person.filled"
-        case .gapTrainer:  return "figure.walk.motion"
-        case .recents:     return "clock.arrow.circlepath"
+        case .sections:       return "rectangle.stack.badge.plus"
+        case .voice:          return "person.wave.2.fill"
+        case .silentPractice: return "speaker.slash.fill"
+        case .groove:         return "waveform.path"
+        case .accents:        return "chart.bar.fill"
+        case .visuals:        return "circle.circle.fill"
+        case .borderFlash:    return "rectangle.inset.filled.and.person.filled"
+        case .gapTrainer:     return "figure.walk.motion"
+        case .recents:        return "clock.arrow.circlepath"
         }
     }
 }
@@ -84,8 +87,9 @@ extension AppControl {
     /// to declare a home, and the test asserts the base set and that no section is left empty.
     var placement: ControlPlacement {
         switch self {
-        case .tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound, .countIn, .silentPractice:
+        case .tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound, .countIn:
             return .mainScreen
+        case .silentPractice:  return .settings(.silentPractice)
         case .sectionBuilder:  return .settings(.sections)
         case .voiceCounting:   return .settings(.voice)
         case .voiceVolume:     return .settings(.voice)

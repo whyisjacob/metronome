@@ -8,13 +8,12 @@ import XCTest
 final class SettingsCatalogTests: XCTestCase {
 
     /// The main screen is the base controls only — tempo, transport, meter, subdivision, beat visual, the
-    /// sound picker, the count-in / pickup, and the silent-practice mute (a primary control a musician hits
-    /// mid-practice, so it lives on the main screen alongside them).
+    /// sound picker, and the count-in / pickup. Silent practice deliberately moved OUT to Settings (it's a
+    /// mode set occasionally, not more important than tempo/meter), so it is no longer in this set.
     func testMainScreenHoldsOnlyTheBaseControls() {
         let onMain = AppControl.allCases.filter { $0.placement == .mainScreen }
         XCTAssertEqual(Set(onMain),
-                       [.tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound, .countIn,
-                        .silentPractice])
+                       [.tempo, .transport, .timeSignature, .subdivision, .beatVisual, .sound, .countIn])
     }
 
     /// Sound is a base, main-screen control — it must not also be stranded in a Settings section (a
@@ -48,9 +47,9 @@ final class SettingsCatalogTests: XCTestCase {
                        "a Settings section has no control, or a control references a missing section")
     }
 
-    func testSettingsSectionsAreTheExpectedEightInOrder() {
+    func testSettingsSectionsAreTheExpectedNineInOrder() {
         XCTAssertEqual(SettingsSection.allCases.map(\.rawValue),
-                       ["sections", "voice", "groove", "accents", "visuals",
+                       ["sections", "voice", "silentPractice", "groove", "accents", "visuals",
                         "borderFlash", "gapTrainer", "recents"])
         for section in SettingsSection.allCases {
             XCTAssertFalse(section.title.isEmpty, "\(section) has no title")

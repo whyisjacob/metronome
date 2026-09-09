@@ -59,14 +59,13 @@ struct ContentView: View {
                             viewModel.toggle()
                         }
 
-                        // Silent-practice sits directly BELOW Start, so it reads as a practice *modifier* of
-                        // the transport rather than a primary control — yet stays one tap away mid-practice,
-                        // immediately adjacent to Start (not buried down the scroll). This is the SAME shared
-                        // MuteControlView used in song mode (placed under the song transport in
-                        // SongNowPlayingView), so the control is identical and consistently positioned
-                        // relative to the transport in both modes. Muted-but-running stays unmistakable via
-                        // the view's own always-visible status line + channel chips.
-                        MuteControlView(viewModel: viewModel)
+                        // Silent practice now lives in Settings (it's a mode set occasionally — not more
+                        // important than tempo/meter). To keep a muted-but-running metronome from reading as
+                        // broken, we surface only a tiny "Silent" tag directly under Start when ALL audio is
+                        // off — an indicator, not a control (the actual toggles are one tap away in Settings).
+                        if viewModel.isAudioMuted {
+                            MutedIndicator()
+                        }
 
                         // Meter + subdivision stay on the main screen: they're changed constantly, and
                         // they're the "current time signature + subdivision" readout.

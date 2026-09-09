@@ -64,6 +64,20 @@ struct BeatAccentCellStyle: ButtonStyle {
     }
 }
 
+/// A tiny, unobtrusive "Silent" status tag shown near the transport on the main screen when ALL audio is
+/// muted — so a muted-but-running metronome reads as intentionally silent rather than broken. Indicator
+/// only: the silent-practice controls live in the Settings "Silent practice" section (`MuteControlView`).
+/// Takes no space when audio is on (call sites gate it on `viewModel.isAudioMuted`).
+struct MutedIndicator: View {
+    var body: some View {
+        Label("Silent", systemImage: "speaker.slash.fill")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Theme.textSecondary)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel("Audio muted — the metronome is still running, silently.")
+    }
+}
+
 /// A titled container card.
 struct Card<Content: View>: View {
     let title: String?

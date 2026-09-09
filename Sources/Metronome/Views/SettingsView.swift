@@ -120,8 +120,9 @@ struct SettingsView: View {
 
     @ViewBuilder private func content(for section: SettingsSection) -> some View {
         switch section {
-        case .sections:    EmptyView()   // rendered as a launcher in the section loop, not here
-        case .voice:       voiceSection
+        case .sections:       EmptyView()   // rendered as a launcher in the section loop, not here
+        case .voice:          voiceSection
+        case .silentPractice: MuteControlView(viewModel: viewModel)
         case .groove:      GrooveControlView(viewModel: viewModel)
         case .accents:     AccentRowView(viewModel: viewModel)
         case .visuals:     visualsSection
@@ -137,6 +138,9 @@ struct SettingsView: View {
         switch section {
         case .sections:    return ""      // the launcher supplies its own descriptive subtitle
         case .voice:       return soundSettings.speakSubdivisions ? "Counts subdivisions aloud" : "Beat numbers only"
+        case .silentPractice:
+            return viewModel.isAudioMuted ? "All audio off"
+                 : (viewModel.isFullOutput ? "Full output" : "Reduced output")
         case .groove:      return grooveSummary
         case .accents:     return "\(viewModel.accents.count)-beat pattern"
         case .visuals:     return settings.indicatorStyle.displayName
