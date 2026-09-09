@@ -1,0 +1,13 @@
+{
+  "name": "metronome-marketing-frame",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Renders App Store marketing screenshots by compositing a raw iOS capture into an HTML/CSS layout in headless Chromium (Puppeteer). Replaces the old Pillow/PIL drawing pipeline.",
+  "type": "module",
+  "scripts": {
+    "frame": "node marketing_frame.mjs"
+  },
+  "dependencies": {
+    "puppeteer": "^25.10.0"
+  }
+}

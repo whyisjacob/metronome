@@ -46,18 +46,28 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Install XcodeGen + xcparse + Pillow
+      - name: Install XcodeGen + xcparse
         run: |
           brew install xcodegen
           # xcparse extracts XCTAttachment images (our screenshots) out of the .xcresult as PNGs.
           brew install chargepoint/xcparse/xcparse
           xcparse version || true
-          # Pillow (in a venv, to sidestep PEP 668 "externally-managed" pip) composites the raw captures
-          # into styled App Store marketing images via scripts/marketing_frame.py.
-          python3 -m venv "$RUNNER_TEMP/mktvenv"
-          "$RUNNER_TEMP/mktvenv/bin/python" -m pip install --upgrade pip >/dev/null
-          "$RUNNER_TEMP/mktvenv/bin/python" -m pip install Pillow
-          "$RUNNER_TEMP/mktvenv/bin/python" -c "import PIL; print('Pillow', PIL.__version__)"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install headless-Chromium renderer (Puppeteer)
+        working-directory: scripts
+        run: |
+          # scripts/marketing_frame.mjs composites each raw capture into a styled App Store marketing
+          # image by laying it out in HTML/CSS and screenshotting it in headless Chromium (replaces the
+          # old Pillow/PIL drawing pipeline — PIL could not do real type, gradients or shadows).
+          # `npm ci` installs Puppeteer from the committed lockfile; its postinstall downloads a pinned
+          # Chromium. A launch smoke-test fails the job early if that Chromium didn't materialise.
+          npm ci
+          node -e "import('puppeteer').then(async p=>{const b=await p.default.launch({args:['--no-sandbox']});console.log('chromium OK:', await b.version());await b.close();})"
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -171,12 +181,6 @@ jobs:
           set -uo pipefail
           FAIL=0
 
-          # Prioritised caption fonts — scripts/marketing_frame.py picks the first Pillow can actually open.
-          # Prefer the app's on-brand rounded face, then SF Pro, then a guaranteed-present static bold, then
-          # Helvetica. (The script fails loudly if none load.)
-          FONTS="/System/Library/Fonts/SFNSRounded.ttf,/System/Library/Fonts/SFNSRounded.otf,/System/Library/Fonts/SFNS.ttf,/System/Library/Fonts/Supplemental/Arial Bold.ttf,/System/Library/Fonts/Helvetica.ttc"
-          PYBIN="$RUNNER_TEMP/mktvenv/bin/python"
-
           # Benefit-led, musician-facing headline per screen. TRUE to the app — no fabricated features.
           caption_for() {
             case "$1" in
@@ -228,7 +232,7 @@ jobs:
             echo "---- RAW $rawdir (want ${W}x${H}) ----"
             verify_dims "$rawdir" "$W" "$H" "either" || return 1
 
-            # Composite every raw into a styled marketing PNG (scripts/marketing_frame.py, Pillow).
+            # Composite every raw into a styled marketing PNG (scripts/marketing_frame.mjs, headless Chromium).
             local made=0 f base prefix cap out
             while IFS= read -r f; do
               base=$(basename "$f")          # NN-Name_<idx>_<UUID>.png
@@ -236,9 +240,9 @@ jobs:
               cap="$(caption_for "$prefix")"
               if [ -z "$cap" ]; then echo "note: no caption mapped for '$prefix' — skipping"; continue; fi
               out="$mktdir/${prefix}.png"
-              "$PYBIN" scripts/marketing_frame.py \
+              node scripts/marketing_frame.mjs \
                 --raw "$f" --out "$out" --width "$W" --height "$H" \
-                --caption "$cap" --fonts "$FONTS" \
+                --caption "$cap" \
                 || { echo "::error::compositing failed for $f"; return 1; }
               echo "styled  $out   «$(printf '%s' "$cap" | tr '\n' ' ')»"
               made=$((made+1))

@@ -14,6 +14,10 @@ xcuserdata/
 .build/
 .swiftpm/
 
+# Node deps for the marketing-screenshot renderer (scripts/): committed package.json +
+# package-lock.json pin the versions; node_modules is fetched by `npm ci` locally and in CI.
+scripts/node_modules/
+
 # CI screenshot capture (produced by .github/workflows/screenshots.yml on the runner) + any local
 # screenshot scratch dir. The canonical marketing PNGs live in the run's `ui-screenshots` artifact.
 *.xcresult
