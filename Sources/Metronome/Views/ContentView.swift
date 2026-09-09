@@ -46,10 +46,6 @@ struct ContentView: View {
                         .frame(height: 250)
                         .frame(maxWidth: .infinity)
 
-                    // Silent-practice: a prominent mute + Full / Count / Flash presets, on the main screen
-                    // so a musician can switch mid-practice. Common to single-tempo AND song mode.
-                    MuteControlView(viewModel: viewModel)
-
                     if let song = viewModel.activeSong {
                         // Song mode: the SAME screen becomes the song's display (now-playing strip +
                         // section progress + transport + exit). No separate player.
@@ -62,6 +58,15 @@ struct ContentView: View {
                         TransportButton(isPlaying: viewModel.isPlaying) {
                             viewModel.toggle()
                         }
+
+                        // Silent-practice sits directly BELOW Start, so it reads as a practice *modifier* of
+                        // the transport rather than a primary control — yet stays one tap away mid-practice,
+                        // immediately adjacent to Start (not buried down the scroll). This is the SAME shared
+                        // MuteControlView used in song mode (placed under the song transport in
+                        // SongNowPlayingView), so the control is identical and consistently positioned
+                        // relative to the transport in both modes. Muted-but-running stays unmistakable via
+                        // the view's own always-visible status line + channel chips.
+                        MuteControlView(viewModel: viewModel)
 
                         // Meter + subdivision stay on the main screen: they're changed constantly, and
                         // they're the "current time signature + subdivision" readout.

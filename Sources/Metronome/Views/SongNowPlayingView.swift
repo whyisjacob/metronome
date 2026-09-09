@@ -14,6 +14,10 @@ struct SongNowPlayingView: View {
             titleHeader
             nowPlayingCard
             transportRow
+            // Silent-practice modifier, directly below the transport — the SAME shared MuteControlView used
+            // in single-tempo mode, so muting behaves identically and sits in the same place relative to the
+            // transport in both modes. Reachable mid-song without leaving the now-playing screen.
+            MuteControlView(viewModel: viewModel)
             masterTempoCard
             sectionProgressCard
             exitButton
