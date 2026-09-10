@@ -189,6 +189,9 @@ jobs:
               03*) printf 'It counts out loud —\n1 e & a.' ;;
               04*) printf 'Build the whole song,\nsection by section.' ;;
               05*) printf 'Practice in silence.' ;;
+              06*) printf 'Swing it, shape it,\nchoose your sound.' ;;
+              07*) printf 'Let the click\ndisappear.' ;;
+              08*) printf 'All your songs,\nsaved and ready.' ;;
               *)   printf '' ;;
             esac
           }

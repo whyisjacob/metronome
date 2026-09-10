@@ -40,12 +40,22 @@ final class MetronomeUITests: XCTestCase {
         _ = app.staticTexts["MAELZEL"].waitForExistence(timeout: 30)
         capture("01-Metronome-Main")
 
-        // (02) Scroll the main screen to reveal the meter (time-signature) + subdivision + sound controls
-        //      that sit below the beat visual, then snapshot them. Best-effort: a blind swipe is enough for
-        //      a screenshot, and if there's no scroll view we just re-shoot the top.
+        // (02) Scroll the main screen to reveal the meter (time-signature) + subdivision controls that sit
+        //      below the beat visual, then snapshot them.
+        //
+        //      NOT a blind `swipeUp()`: that over-scrolls and parks the Time-signature CARD TITLE flush
+        //      under the status bar, where "TIME SIGNATURE" collides with the status-bar clock ("9:41").
+        //      Instead do ONE controlled, low-inertia drag of ~38% of the screen height, which lands the
+        //      meter card a comfortable distance below the status bar with the subdivision grid still in
+        //      frame. The touch-down point (dy 0.72) is the meter card's title / the gap above it in the
+        //      un-scrolled layout — below the Start button and above the numerator/denominator wheels (both
+        //      of which sit elsewhere at rest) — so the gesture pans the scroll view rather than pressing a
+        //      button or spinning a wheel. Best-effort: if there's no scroll view we just re-shoot the top.
         let mainScroll = app.scrollViews.firstMatch
         if mainScroll.waitForExistence(timeout: 5) {
-            mainScroll.swipeUp()
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.34))
+            start.press(forDuration: 0.1, thenDragTo: end)
         }
         capture("02-Meter-And-Controls")
         // Return to the top so later navigation (the header Settings button) starts from a known position.
@@ -102,6 +112,74 @@ final class MetronomeUITests: XCTestCase {
                 exit.tap()
             }
         }
+
+        // ================================================================================================
+        // Applicable feature screens for App Store panels 06 / 07 / 08. Each is a REAL, reachable screen in
+        // the shipping app (verified Sept 2026 against the SwiftUI views), captured so those panels show the
+        // feature they name instead of reusing the meter (02) / settings (03) / song-builder (04) shots.
+        // Same best-effort, non-asserting style: every step is guarded and simply skipped if an element is
+        // missing, so one screen failing never blocks the others. The (04)/(05) steps above already created
+        // and left "New Song" in the library, which shot 08 relies on.
+        // ================================================================================================
+
+        // Land on the Metronome tab, scrolled to the top, so the header Settings button and the main-screen
+        // scroll both start from a known position (the (05) "Exit song" already returns us here).
+        if app.tabBars.buttons["Metronome"].waitForExistence(timeout: 10) {
+            app.tabBars.buttons["Metronome"].tap()
+        }
+        let baseScroll = app.scrollViews.firstMatch
+        _ = baseScroll.waitForExistence(timeout: 5)
+
+        // (06-Sounds) The Sound picker (Click / Woodblock / Beep / Rimshot / Cowbell / Voice) lives on the
+        //      main screen in the "Sound" card, near the bottom of the scroll (below Count-in). Scroll it into
+        //      view via its unique "Woodblock" button, then snapshot — the "choose your sound" half of the
+        //      "Timing & feel" panel. (Shot 02's controlled drag deliberately stops above this card.)
+        if baseScroll.exists {
+            var down = 0
+            while !app.buttons["Woodblock"].isHittable && down < 6 { baseScroll.swipeUp(); down += 1 }
+        }
+        if app.buttons["Woodblock"].waitForExistence(timeout: 3) {
+            capture("06-Sounds")
+        }
+        // Scroll back up until the header Settings button is reachable again.
+        if baseScroll.exists {
+            var up = 0
+            while !app.buttons["Settings"].isHittable && up < 6 { baseScroll.swipeDown(); up += 1 }
+        }
+
+        // (06-Groove) Swing + idiomatic rhythm-cell "feel" controls — the strongest "Timing & feel" shot.
+        //      They live in the collapsed "Groove" section of Settings; open Settings, expand Groove, snapshot.
+        if openSettings() {
+            expandSettingsSection("Groove")
+            _ = app.sliders.firstMatch.waitForExistence(timeout: 3)   // the swing slider rendered
+            capture("06-Groove")
+            dismissSettings()
+        }
+
+        // (07-GapTrainer) The gap-click practice trainer — its own Settings section with a real ACTIVE state.
+        //      Expand it and switch it ON so the mode picker (Random / Bars) and its controls are shown — the
+        //      actual practice tool "in action", not the generic collapsed settings list of shot 03.
+        if openSettings() {
+            expandSettingsSection("Gap trainer")
+            let enable = app.switches["Silence beats to practise internal time"]
+            var t = 0
+            while !enable.isHittable && t < 3 { app.scrollViews.firstMatch.swipeUp(); t += 1 }
+            if enable.exists, enable.isHittable, (enable.value as? String) != "1" { enable.tap() }
+            _ = app.switches["Keep a soft downbeat"].waitForExistence(timeout: 3)   // enabled controls rendered
+            capture("07-GapTrainer")
+            dismissSettings()
+        }
+
+        // (08-SongLibrary) The saved-songs list (the Songs tab) — distinct from the song BUILDER captured in
+        //      (04). "New Song" is saved by now, so the library shows a real, playable card with its
+        //      section / bar / duration summary. Switch to the Songs tab and snapshot the list.
+        if songsTab.waitForExistence(timeout: 10) {
+            songsTab.tap()
+            if app.navigationBars["Songs"].waitForExistence(timeout: 10) {
+                _ = app.buttons["Play New Song"].firstMatch.waitForExistence(timeout: 5)
+                capture("08-SongLibrary")
+            }
+        }
     }
 
     /// Captures the whole screen and attaches it, kept regardless of test outcome so CI can extract it as a
@@ -112,5 +190,34 @@ final class MetronomeUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    // MARK: - Navigation helpers for the feature screens (06–08)
+
+    /// Opens the unified Settings sheet from the main-screen header button (accessibilityLabel "Settings");
+    /// returns true once its navigation bar appears.
+    @discardableResult
+    private func openSettings() -> Bool {
+        let button = app.buttons["Settings"]
+        guard button.waitForExistence(timeout: 10) else { return false }
+        button.tap()
+        return app.navigationBars["Settings"].waitForExistence(timeout: 15)
+    }
+
+    /// Dismisses the Settings sheet via its "Done" toolbar button. It's a sheet over the whole app, so it
+    /// must be closed before switching tabs or opening it again.
+    private func dismissSettings() {
+        let done = app.navigationBars["Settings"].buttons["Done"]
+        if done.waitForExistence(timeout: 5) { done.tap() }
+    }
+
+    /// Expands a collapsible Settings section by its title. Each accordion header is a Button whose
+    /// accessibility label is the section name (see `CollapsibleSection`), so `app.buttons[title]` finds it;
+    /// scroll it into view first for a section that sits below the fold (e.g. "Gap trainer").
+    private func expandSettingsSection(_ title: String) {
+        let header = app.buttons[title]
+        var tries = 0
+        while !header.isHittable && tries < 6 { app.scrollViews.firstMatch.swipeUp(); tries += 1 }
+        if header.waitForExistence(timeout: 5), header.isHittable { header.tap() }
     }
 }
