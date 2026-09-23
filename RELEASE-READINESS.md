@@ -72,3 +72,14 @@ gh workflow run testflight.yml -R whyisjacob/metronome --ref main
 ```
 
 The workflow is manual-only and does not automatically release to the public App Store.
+
+## Music-theory follow-up
+
+Source revision `0e086c2` passes all **290 unit/audio-accuracy tests**. Compound meter now covers all
+supported denominators, with an explicit displayed tempo beat and compatibility for older songs.
+See [MUSIC-THEORY-AUDIT.md](MUSIC-THEORY-AUDIT.md) for definitions, changes, test coverage and limits.
+[Validation run](https://github.com/whyisjacob/metronome/actions/runs/35891602499).
+
+Final revision `4ff320d` also passes both simulator UI tests: explicit 6/4 beat selection and all four
+visual styles. Eleven captures were exported, with the new meter control inspected.
+[UI evidence](https://github.com/whyisjacob/metronome/actions/runs/35893431362).
