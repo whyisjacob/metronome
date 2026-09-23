@@ -47,7 +47,8 @@ target setting and remains unchanged.
 
 1. Merge the reviewed branch only after its macOS tests pass.
 2. Run the manual TestFlight workflow on the merged revision. Confirm the uploaded build finishes
-   processing in App Store Connect. This review does not upload, distribute or submit a build.
+   processing in App Store Connect. Branch builds have been uploaded for internal testing;
+   no public App Store submission has been made.
 3. On a real iPhone, check Start/Stop, song pause/resume, section skip, voice, silent practice,
    screen locking, phone/Siri interruptions, Bluetooth/headphone disconnects and recovery. Listen for
    missed/doubled beats at 30 and 300 BPM. Simulator accuracy tests cannot establish route latency
@@ -83,3 +84,14 @@ See [MUSIC-THEORY-AUDIT.md](MUSIC-THEORY-AUDIT.md) for definitions, changes, tes
 Final revision `4ff320d` also passes both simulator UI tests: explicit 6/4 beat selection and all four
 visual styles. Eleven captures were exported, with the new meter control inspected.
 [UI evidence](https://github.com/whyisjacob/metronome/actions/runs/35893431362).
+
+## Subdivision notation and TestFlight
+
+Revision `f24adce` restores meter-aware musical symbols on subdivision buttons, including hollow
+and filled note heads, flags, dots and explicit tuplet ratios. All **292 unit/audio tests** and
+**three simulator UI tests** passed; the notation screenshot was visually inspected.
+Version **1.0 (33)** uploaded successfully through the signed TestFlight pipeline.
+Apple reports processing `VALID` and internal status `IN_BETA_TESTING`; the existing Test group
+includes build 33. [Read-only availability check](https://github.com/whyisjacob/metronome/actions/runs/35902501499).
+[Build, tests and upload](https://github.com/whyisjacob/metronome/actions/runs/35902995245).
+[UI verification](https://github.com/whyisjacob/metronome/actions/runs/35902995012).

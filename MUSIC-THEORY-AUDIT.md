@@ -31,7 +31,8 @@ song does not suddenly become three times faster. New exports explicitly persist
 - Simple grids provide 1–8 clicks per beat, including 3-, 5-, 6- and 7-part divisions.
 - Grouped grids expose distinct 1-, 3-, 5-, 6-, 7- and 12-part divisions. Native note labels follow
   the denominator: three divisions of a dotted half are quarters, not eighths.
-- The selector uses click counts instead of misleading quarter-note glyphs in half-note meters.
+- The selector displays musical note values derived from the meter: hollow/filled heads, stems,
+  flags, augmentation dots and explicit tuplet ratios. It does not substitute click counts for notation.
 - Swing interpolates each pair from 1:1 to 2:1. Main beats and pair boundaries do not move.
   This is a defined practice range, not a claim to reproduce every performer's swing interpretation.
 - Pattern labels use beat fractions: 3/4 + 1/4, 1/2 + 1/4 + 1/4, or 1/4 + 1/4 + 1/2.
@@ -77,3 +78,10 @@ and [both simulator UI tests passed](https://github.com/whyisjacob/metronome/act
 Eleven screenshots were captured; the 6/4 dotted-half selector and tempo display were visually inspected.
 The first UI attempt passed all four styles but failed to locate the SwiftUI wheel by its container label;
 the test now targets the wheel itself and scrolls outside its touch area. App timing code was unchanged.
+
+Subdivision notation follow-up on `f24adce`: **292 unit/audio tests and all three UI tests passed**.
+The notation tests compare each symbol's written duration (including dots and tuplet ratios) with
+the scheduled subdivision across supported denominators and beat interpretations. The restored
+note heads, stems, flags and ratios were visually inspected in a fresh simulator capture.
+[Unit tests and build 33 upload](https://github.com/whyisjacob/metronome/actions/runs/35902995245).
+[UI tests and notation capture](https://github.com/whyisjacob/metronome/actions/runs/35902995012).
