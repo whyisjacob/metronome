@@ -2,6 +2,25 @@ import XCTest
 @testable import Metronome
 
 final class MeterInterpretationTests: XCTestCase {
+    func testCompoundQuarterAndSixteenthMetersInRenderedAudio() throws {
+        for (numerator, denominator, beats) in [(6, 4, 2), (9, 16, 3)] {
+            let config = MetronomeConfiguration(bpm: 120,
+                timeSignature: TimeSignature(numerator: numerator, denominator: denominator),
+                subdivision: .eighth)
+            let engine = MetronomeEngine()
+            try engine.prepareForOfflineRendering(sampleRate: 48_000)
+            defer { engine.teardownOfflineRendering() }
+            let samples = try engine.renderOffline(config: config, seconds: Double(beats) + 0.05)
+            let onsets = OfflineRenderAccuracyTests.detectOnsets(in: samples, minGap: 864)
+            // Two bars at dotted-note = 120: each main beat lasts 24,000 frames,
+            // each denominator-note division 8,000 frames. Include the next downbeat.
+            XCTAssertEqual(onsets.count, numerator * 2 + 1)
+            for (tick, frame) in onsets.enumerated() {
+                XCTAssertLessThanOrEqual(abs(frame - tick * 8_000), 1)
+            }
+        }
+    }
+
     func testCompoundBeatUnitsAcrossDenominators() {
         for (denominator, name) in [(2, "Dotted whole"), (4, "Dotted half"),
                                     (8, "Dotted quarter"), (16, "Dotted eighth")] {

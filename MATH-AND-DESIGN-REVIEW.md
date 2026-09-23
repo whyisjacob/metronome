@@ -2,8 +2,10 @@
 
 ## Timing model
 
-The BPM value counts the app's main pulse: the denominator note in simple meters and the
-dotted quarter in compound eighth-note meters (6/8, 9/8, 12/8, and larger multiples of three).
+The BPM value counts the explicitly displayed beat unit: a denominator note or a dotted beat
+containing three denominator notes. New 6/x, 9/x, 12/x and larger multiples of three default to
+grouped beats across all supported denominators; 3/x can optionally be counted in one.
+Existing saved meters retain their original beat interpretation. See MUSIC-THEORY-AUDIT.md.
 At BPM `b`, sample rate `r`, and `q` subdivisions per main pulse, straight click `n` belongs at
 `round(n × 60 × r / (b × q))`. There is no repeated addition of rounded tick lengths.
 Quantization to a hardware sample is unavoidable: the ideal nearest-sample error is at most

@@ -39,8 +39,7 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
     ///   * `.triplet`  → 3 — same three-per-beat division (offered as an alias).
     ///   * `.sixteenth`→ 6 — compound sixteenths.
     ///   * `.thirtysecond` → 12.
-    /// Simple meters are unchanged (`ticksPerBeat`). Tuplets are only offered in simple meters (they are
-    /// not in `compoundCases`), so they fall through to their simple tick count.
+    /// Simple meters are unchanged (`ticksPerBeat`). Five and seven divide either beat evenly.
     func ticksPerBeat(compound: Bool) -> Int {
         guard compound else { return ticksPerBeat }
         switch self {
@@ -49,7 +48,7 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
         case .triplet:      return 3
         case .sixteenth:    return 6
         case .thirtysecond: return 12
-        case .quintuplet:   return 5   // not offered in compound; keep the simple meaning if forced
+        case .quintuplet:   return 5
         case .sextuplet:    return 6
         case .septuplet:    return 7
         }
@@ -58,21 +57,6 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
     /// Distinct divisions of a compound beat. Three and six have existing aliases;
     /// five, seven and twelve are also musically valid divisions.
     static let compoundCases: [Subdivision] = [.quarter, .eighth, .sixteenth, .quintuplet, .septuplet, .thirtysecond]
-
-    /// Display name of the subdivision as heard in a compound meter (where `.quarter` is the main beat and
-    /// `.eighth` is the three-per-beat pulse).
-    var compoundDisplayName: String {
-        switch self {
-        case .quarter:      return "Main beat"
-        case .eighth:       return "Eighths"
-        case .sixteenth:    return "Sixteenths"
-        case .triplet:      return "Eighths"
-        case .thirtysecond: return "32nds"
-        case .quintuplet:   return "Quintuplet"   // not shown in the compound picker
-        case .sextuplet:    return "Sextuplet"
-        case .septuplet:    return "Septuplet"
-        }
-    }
 
     /// The bare note-value name **assuming the beat is a quarter note** — literally correct only in ×/4
     /// meters. Kept for internal use and the accuracy-test failure labels; for anything shown to the user
