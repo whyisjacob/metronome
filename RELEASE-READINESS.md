@@ -28,7 +28,13 @@ test or a complete accessibility audit.
 - Workflow YAML parsing and `git diff --check`: passed.
 - New regressions cover unrelated JSON, malformed wrappers, valid legacy/empty song imports,
   audio failure state and successful retry.
-- macOS compilation and XCTest: pending; see the release branch's Actions run before merging.
+- macOS compilation and XCTest: **276 tests passed, zero failures**, using Xcode 26.6 on source
+  revision `d27135f`. [Successful build and test run](https://github.com/whyisjacob/metronome/actions/runs/35887401200).
+- Fresh simulator screenshots: **not verified**. The
+  [capture attempt](https://github.com/whyisjacob/metronome/actions/runs/35887210311) stalled during
+  simulator boot before capturing screens and was cancelled. The workflow now bounds startup to
+  10 minutes, bounds the entire job to 30 minutes, and stops on boot-status failures. Re-run on a
+  healthy macOS runner before using new store images.
 - Source/project review found no network or analytics dependency in the shipping target. The privacy
   manifest declares no collection or tracking; UserDefaults reason CA92.1 and
   `ITSAppUsesNonExemptEncryption: false` are present. Smart Import camera/photo code is excluded.

@@ -33,6 +33,7 @@ jobs:
   ui-screenshots:
     name: Capture UI screenshots (6.5" 1284x2778 + 6.9" 1320x2868)
     runs-on: macos-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -159,10 +160,11 @@ jobs:
           echo "Resolved  6.5\"=$U65   6.9\"=$U69"
 
       - name: Boot simulators
+        timeout-minutes: 10
         run: |
           for u in "${{ steps.sim.outputs.udid_65 }}" "${{ steps.sim.outputs.udid_69 }}"; do
             xcrun simctl boot "$u" || true
-            xcrun simctl bootstatus "$u" -b || true
+            xcrun simctl bootstatus "$u" -b
             # Clean, deterministic status bar for nicer marketing screenshots (best-effort).
             xcrun simctl status_bar "$u" override \
               --time "9:41" --batteryState charged --batteryLevel 100 \
