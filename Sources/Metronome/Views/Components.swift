@@ -5,9 +5,9 @@ struct PillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(Theme.textPrimary)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.surfaceRaised))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke))
-            .opacity(configuration.isPressed ? 0.55 : 1)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceRaised))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.stroke))
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
@@ -16,13 +16,13 @@ struct SelectableStyle: ButtonStyle {
     var isOn: Bool
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 17, weight: .semibold, design: .rounded))
+            .font(.system(size: 17, weight: .semibold, design: .default))
             .foregroundStyle(isOn ? Theme.background : Theme.textPrimary)
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(isOn ? Theme.accentNormal : Theme.surfaceRaised)
             )
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.stroke))
             .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
@@ -35,11 +35,11 @@ struct BeatAccentCellStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .font(.system(size: 15, weight: .bold, design: .default))
             .foregroundStyle(foreground)
-            .background(RoundedRectangle(cornerRadius: 12).fill(fill))
+            .background(RoundedRectangle(cornerRadius: 8).fill(fill))
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(accent == .muted ? Theme.textSecondary.opacity(0.5) : Theme.stroke,
                                   style: StrokeStyle(lineWidth: 1, dash: accent == .muted ? [4, 3] : []))
             )
@@ -91,16 +91,15 @@ struct Card<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let title {
-                Text(title.uppercased())
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(1.3)
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
             }
             content()
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Theme.surface))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Theme.stroke))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.surface))
+
     }
 }

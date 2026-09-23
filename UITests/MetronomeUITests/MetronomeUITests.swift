@@ -20,7 +20,7 @@ import XCTest
 ///    error. A screenshot alone is not evidence that audio playback succeeded.
 ///
 /// Labels used below were verified against the current views (Sept 2026):
-///   header `Text("MAELZEL")`; tab `Songs`; nav bars `Songs` / `Edit Song` / `Settings`; buttons
+///   header `Text("Maelzel")`; tab `Songs`; nav bars `Songs` / `Edit Song` / `Settings`; buttons
 ///   `Settings`, `Add song`, `Done` (builder + settings), `Play <song name>`, `Exit song`.
 final class MetronomeUITests: XCTestCase {
 
@@ -33,11 +33,11 @@ final class MetronomeUITests: XCTestCase {
     }
 
     func testCaptureKeyScreens() throws {
-        // (01) Main metronome screen — the default (first) tab on launch: the "MAELZEL" header, the beat
+        // (01) Main metronome screen — the default (first) tab on launch: the "Maelzel" header, the beat
         //      visual, tempo, and Start. (Silent practice now lives in Settings; the main screen shows only
         //      a tiny "Silent" tag under Start when audio is muted.) Ignore the wait result: if the marker
         //      never appears we still snapshot whatever rendered, so the artifact is never empty.
-        _ = app.staticTexts["MAELZEL"].waitForExistence(timeout: 30)
+        _ = app.staticTexts["Maelzel"].waitForExistence(timeout: 30)
         capture("01-Metronome-Main")
 
         // (02) Scroll the main screen to reveal the meter (time-signature) + subdivision controls that sit

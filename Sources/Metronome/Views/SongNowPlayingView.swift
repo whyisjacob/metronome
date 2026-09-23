@@ -31,7 +31,7 @@ struct SongNowPlayingView: View {
     private var titleHeader: some View {
         VStack(spacing: 2) {
             Text(song.name)
-                .font(.system(size: 26, weight: .heavy, design: .rounded))
+                .font(.system(size: 26, weight: .semibold, design: .default))
                 .foregroundStyle(Theme.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -49,7 +49,7 @@ struct SongNowPlayingView: View {
             VStack(spacing: 8) {
                 if let section = viewModel.currentSongSection {
                     Text(section.name)
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .font(.system(size: 22, weight: .bold, design: .default))
                         .foregroundStyle(Theme.accentNormal)
                     Text("\(song.resultingBPM(section.tempoBPM)) BPM · \(section.meterAndFeel)")
                         .font(.system(size: 16, weight: .semibold))
@@ -69,7 +69,7 @@ struct SongNowPlayingView: View {
                     }
                 } else {
                     Text(viewModel.songFinished ? "Finished" : "Ready")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .font(.system(size: 22, weight: .bold, design: .default))
                         .foregroundStyle(Theme.textPrimary)
                     Text(viewModel.songFinished ? "Tap play to run it again." : "Tap play to start.")
                         .font(.system(size: 14)).foregroundStyle(Theme.textSecondary)
@@ -114,7 +114,7 @@ struct SongNowPlayingView: View {
         Card("Master tempo") {
             HStack(spacing: 12) {
                 Text("\(Int((viewModel.tempoScale * 100).rounded()))%")
-                    .font(.system(size: 24, weight: .heavy, design: .rounded))
+                    .font(.system(size: 24, weight: .semibold, design: .default))
                     .monospacedDigit()
                     .foregroundStyle(viewModel.tempoScale == 1.0 ? Theme.textPrimary : Theme.accentNormal)
                 Spacer(minLength: 8)

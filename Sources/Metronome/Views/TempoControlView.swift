@@ -8,7 +8,7 @@ struct TempoControlView: View {
         VStack(spacing: 16) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("\(Int(viewModel.bpm.rounded()))")
-                    .font(.system(size: 76, weight: .heavy, design: .rounded))
+                    .font(.system(size: 72, weight: .regular, design: .default))
                     .monospacedDigit()
                     .foregroundStyle(Theme.textPrimary)
                 Text("BPM")
@@ -28,8 +28,8 @@ struct TempoControlView: View {
             HStack(spacing: 12) {
                 nudge("−1", -1)
                 Button(action: { viewModel.tap() }) {
-                    Text("TAP")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                    Text("Tap tempo")
+                        .font(.system(size: 16, weight: .medium, design: .default))
                         .frame(maxWidth: .infinity, minHeight: 50)
                 }
                 .buttonStyle(PillButtonStyle())
@@ -43,7 +43,7 @@ struct TempoControlView: View {
     private func nudge(_ label: String, _ delta: Double) -> some View {
         Button(action: { viewModel.nudgeBPM(delta) }) {
             Text(label)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .font(.system(size: 22, weight: .bold, design: .default))
                 .frame(width: 74, height: 50)
         }
         .buttonStyle(PillButtonStyle())

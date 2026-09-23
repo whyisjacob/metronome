@@ -1,0 +1,46 @@
+name: Design review captures
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Sources/Metronome/Views/**'
+      - 'UITests/**'
+      - '.github/workflows/design-review.yml'
+concurrency:
+  group: design-review-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -switch /Applications/Xcode.app
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Select an installed iPhone simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for group in devices.values() for d in group if d.get("isAvailable") and "iPhone" in d["name"]))')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Assert navigation and capture every visual style
+        timeout-minutes: 12
+        run: |
+          xcodebuild test -scheme MetronomeUITests \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -parallel-testing-enabled NO \
+            -only-testing:MetronomeUITests/DesignReviewTests \
+            -resultBundlePath DesignReview.xcresult CODE_SIGNING_ALLOWED=NO
+      - name: Export screenshot attachments
+        if: always()
+        run: xcrun xcresulttool export attachments --path DesignReview.xcresult --output-path review-captures
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: design-review
+          path: |
+            review-captures/
+            DesignReview.xcresult/
+          retention-days: 7

@@ -57,7 +57,7 @@ struct GrooveControlView: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Text(swingReadout)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(.system(size: 15, weight: .bold, design: .default))
                     .monospacedDigit()
                     .foregroundStyle(swingReadoutColor)
             }
@@ -108,7 +108,7 @@ struct GrooveControlView: View {
                     Button { viewModel.setCell(cell) } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(cell.displayName)
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .font(.system(size: 15, weight: .bold, design: .default))
                             Text(cell.caption)
                                 .font(.system(size: 11))
                                 .foregroundStyle(viewModel.cell == cell

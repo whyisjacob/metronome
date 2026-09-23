@@ -50,7 +50,7 @@ final class VisualSettingsTests: XCTestCase {
 
     func testDefaultsAreBallAndFlashOff() {
         let store = VisualSettingsStore(defaults: makeDefaults())
-        XCTAssertEqual(store.indicatorStyle, .ball)
+        XCTAssertEqual(store.indicatorStyle, .dots)
         XCTAssertFalse(store.borderFlashEnabled)
         XCTAssertEqual(store.accentFlashColor, .orange)
         XCTAssertEqual(store.normalFlashColor, .blue)

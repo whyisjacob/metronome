@@ -31,10 +31,10 @@ struct ContentView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
 
-            ScrollView {
+            VStack(spacing: 0) {
+                header.padding(.horizontal, 20).padding(.bottom, 8)
+                ScrollView {
                 VStack(spacing: 16) {
-                    header
-
                     if let error = viewModel.playbackError {
                         VStack(spacing: 8) {
                             Text(error).font(.callout)
@@ -55,7 +55,7 @@ struct ContentView: View {
                                         : BeatVisualState.idle(beatsPerMeasure: viewModel.beatsPerBar,
                                                                ticksPerBeat: viewModel.ticksPerBeat,
                                                                accents: viewModel.accents))
-                        .frame(height: 250)
+                        .frame(height: settings.indicatorStyle == .dots ? 64 : (settings.indicatorStyle == .ring ? 240 : 200))
                         .frame(maxWidth: .infinity)
 
                     if let song = viewModel.activeSong {
@@ -104,6 +104,9 @@ struct ContentView: View {
                 .padding(.bottom, 28)
             }
 
+                .clipped()
+            }
+
             // Screen-border flash: an overlay above the scroll content, below no interactive control
             // (it never intercepts touches). Independent of the chosen indicator.
             BorderFlashOverlay(flashID: viewModel.flashID,
@@ -145,7 +148,7 @@ struct ContentView: View {
     private var settingsTag: some View {
         Button { showSettings = true } label: {
             HStack(spacing: 6) {
-                Text("Many more options in Settings")
+                Text("Practice settings")
                     .font(.system(size: 13, weight: .semibold))
                 Image(systemName: "arrow.right")
                     .font(.system(size: 12, weight: .bold))
@@ -162,9 +165,8 @@ struct ContentView: View {
         // Title centred via a ZStack so the leading (settings) and trailing (save) controls don't pull it
         // off-centre. (The experimental photo Smart Import is intentionally not surfaced here — see below.)
         ZStack {
-            Text("MAELZEL")
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .tracking(4)
+            Text("Maelzel")
+                .font(.system(size: 20, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
 
             HStack {
@@ -173,6 +175,7 @@ struct ContentView: View {
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(Theme.textSecondary)
                 }
+                .frame(width: 44, height: 44)
                 .accessibilityLabel("Settings")
 
                 Spacer()
@@ -185,6 +188,7 @@ struct ContentView: View {
                             .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(Theme.textSecondary)
                     }
+                    .frame(width: 44, height: 44)
                     .accessibilityLabel("Save as song")
                 }
             }

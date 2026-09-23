@@ -33,7 +33,7 @@ struct RecentsBar: View {
     private func chip(for config: MetronomeConfiguration) -> some View {
         VStack(spacing: 3) {
             Text(config.timeSignature.displayString)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .font(.system(size: 15, weight: .bold, design: .default))
                 .monospacedDigit()
                 .foregroundStyle(Theme.textPrimary)
             Text("\(Int(config.bpm.rounded())) · \(config.subdivision.symbol)")

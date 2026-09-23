@@ -68,7 +68,7 @@ private struct CountInStepperRow: View {
             .accessibilityLabel("Shorter count-in")
 
             Text(label)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(.system(size: 16, weight: .bold, design: .default))
                 .frame(minWidth: 84)
                 .monospacedDigit()
                 .multilineTextAlignment(.center)

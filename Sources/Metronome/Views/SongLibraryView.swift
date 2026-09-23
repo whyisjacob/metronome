@@ -156,7 +156,7 @@ struct SongLibraryView: View {
                 .font(.system(size: 42))
                 .foregroundStyle(Theme.textSecondary)
             Text("No songs yet")
-                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .font(.system(size: 20, weight: .bold, design: .default))
             Text("Tap + to build a tempo-map — sections whose tempo, meter, subdivision and groove change through the piece. Or tap the bookmark on the Metronome screen to save your current settings as a song.")
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.textSecondary)
@@ -187,7 +187,7 @@ private struct SongCard: View {
             Button(action: onEdit) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(song.name)
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .font(.system(size: 18, weight: .bold, design: .default))
                         .foregroundStyle(Theme.textPrimary)
                     Text(summary)
                         .font(.system(size: 13))

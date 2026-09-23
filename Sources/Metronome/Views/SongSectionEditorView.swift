@@ -86,7 +86,7 @@ struct SongSectionEditorView: View {
                     VStack(spacing: 16) {
                         Card("Section name") {
                             TextField("Section name", text: $name)
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                .font(.system(size: 18, weight: .semibold, design: .default))
                                 .textFieldStyle(.plain)
                                 .foregroundStyle(Theme.textPrimary)
                         }
@@ -235,7 +235,7 @@ private struct LengthStepper: View {
             .accessibilityLabel("Fewer \(title)")
 
             Text(format(value))
-                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .font(.system(size: 17, weight: .bold, design: .default))
                 .frame(minWidth: 56)
                 .monospacedDigit()
 
