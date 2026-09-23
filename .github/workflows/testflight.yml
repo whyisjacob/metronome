@@ -5,12 +5,19 @@ name: TestFlight upload
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: testflight-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  validate:
+    uses: ./.github/workflows/ios.yml
+
   testflight:
+    needs: validate
     name: Build & upload to TestFlight
     runs-on: macos-latest
     timeout-minutes: 45
@@ -26,6 +33,7 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
+          python3 -c 'import subprocess; version = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--show-sdk-version"], text=True).strip(); assert int(version.split(".")[0]) >= 26, "App Store uploads require iOS SDK 26 or newer"'
 
       - name: Install XcodeGen
         run: brew install xcodegen

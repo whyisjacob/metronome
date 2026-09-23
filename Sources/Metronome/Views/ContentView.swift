@@ -35,6 +35,18 @@ struct ContentView: View {
                 VStack(spacing: 16) {
                     header
 
+                    if let error = viewModel.playbackError {
+                        VStack(spacing: 8) {
+                            Text(error).font(.callout)
+                                .multilineTextAlignment(.center)
+                            Button("Dismiss") { viewModel.dismissPlaybackError() }
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Theme.stop.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+                        .accessibilityElement(children: .contain)
+                    }
+
                     // The visual channel can be muted (pure-audio practice); it then shows the idle
                     // indicator while the engine keeps the beat, so re-enabling it is instant and in-phase.
                     BeatVisualView(style: settings.indicatorStyle,

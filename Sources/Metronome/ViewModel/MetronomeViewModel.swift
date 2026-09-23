@@ -12,6 +12,7 @@ final class MetronomeViewModel: ObservableObject {
 
     @Published private(set) var config: MetronomeConfiguration
     @Published private(set) var isPlaying = false
+    @Published private(set) var playbackError: String?
 
     /// The gap-click trainer overlay (silences beats for internal-time practice). Held here, applied to
     /// the engine live; deliberately not part of `MetronomeConfiguration`, so it never affects Recents,
@@ -187,14 +188,27 @@ final class MetronomeViewModel: ObservableObject {
     }
 
     func start() {
-        do {
-            try engine.start()
-        } catch {
-            return   // v1 stays silent on failure; surfacing audio errors is future work.
-        }
-        setPlaying(true)
+        guard performPlaybackStart({ try engine.start() }) else { return }
         recents?.remember(config)   // the config you actually played becomes/refreshes a recent
     }
+
+    /// Keep the transport and error UI consistent for every throwing audio operation.
+    @discardableResult
+    func performPlaybackStart(_ operation: () throws -> Void) -> Bool {
+        do {
+            try operation()
+            playbackError = nil
+            setPlaying(true)
+            return true
+        } catch {
+            engine.stop()
+            setPlaying(false)
+            playbackError = "Audio couldn’t start. Check your audio connection and try Play again."
+            return false
+        }
+    }
+
+    func dismissPlaybackError() { playbackError = nil }
 
     func stop() {
         engine.stop()
@@ -205,8 +219,8 @@ final class MetronomeViewModel: ObservableObject {
 
     /// Loads a song and starts it on THIS engine, so the main screen becomes the song's display — there is
     /// no separate player. Bumps `songLaunchNonce` so the shell reveals the Metronome tab. Safe to call
-    /// headlessly: the state is set even if the real-time engine can't start (errors are swallowed, exactly
-    /// like `start()`), so the shared view-model reflects the song regardless.
+    /// headlessly: the song remains loaded even if audio cannot start, with a visible error and stopped
+    /// transport so the user can retry.
     func playSong(_ song: Song) {
         guard !song.sections.isEmpty else { return }
         activeSong = song
@@ -216,8 +230,7 @@ final class MetronomeViewModel: ObservableObject {
         songPaused = false
         songLaunchNonce &+= 1
         // Play the master-tempo-scaled copy; the stored song's per-section BPMs are untouched.
-        do { try engine.startSong(song.playbackScaled()) } catch { }
-        setPlaying(true)
+        performPlaybackStart { try engine.startSong(song.playbackScaled()) }
     }
 
     /// Restarts the loaded song from its beginning (the transport's "play" when a song is loaded but
@@ -228,8 +241,7 @@ final class MetronomeViewModel: ObservableObject {
         currentSongBar = 0
         songFinished = false
         songPaused = false
-        do { try engine.startSong(song.playbackScaled()) } catch { }
-        setPlaying(true)
+        performPlaybackStart { try engine.startSong(song.playbackScaled()) }
     }
 
     /// Pause: stop sounding but KEEP the song's position, so Resume continues from here.
@@ -243,7 +255,7 @@ final class MetronomeViewModel: ObservableObject {
     /// Resume from where Pause left off (no reset).
     func resumeSong() {
         guard activeSong != nil, songPaused else { return }
-        do { try engine.resumeSong() } catch { return }
+        guard performPlaybackStart({ try engine.resumeSong() }) else { return }
         songPaused = false
         setPlaying(true)
     }
@@ -251,7 +263,7 @@ final class MetronomeViewModel: ObservableObject {
     /// Restart the current section from its first beat.
     func restartCurrentSection() {
         guard activeSong != nil else { return }
-        engine.seekSong(toSection: currentSectionIndex ?? 0)
+        guard performPlaybackStart({ try engine.seekSong(toSection: currentSectionIndex ?? 0) }) else { return }
         songPaused = false
         setPlaying(true)
     }
@@ -261,7 +273,7 @@ final class MetronomeViewModel: ObservableObject {
         guard let song = activeSong else { return }
         let next = (currentSectionIndex ?? -1) + 1
         guard next < song.sections.count else { return }
-        engine.seekSong(toSection: next)
+        guard performPlaybackStart({ try engine.seekSong(toSection: next) }) else { return }
         songPaused = false
         setPlaying(true)
     }
@@ -270,7 +282,7 @@ final class MetronomeViewModel: ObservableObject {
     func skipToPreviousSection() {
         guard activeSong != nil else { return }
         let prev = (currentSectionIndex ?? 0) - 1
-        engine.seekSong(toSection: max(prev, 0))
+        guard performPlaybackStart({ try engine.seekSong(toSection: max(prev, 0)) }) else { return }
         songPaused = false
         setPlaying(true)
     }
@@ -288,10 +300,12 @@ final class MetronomeViewModel: ObservableObject {
         onSongEdited?(song)
         if isPlaying {
             let section = currentSectionIndex ?? 0
-            do { try engine.startSong(song.playbackScaled()) } catch { }
             // A transparent rebuild to apply the new scale — return to where we were WITHOUT replaying the
             // section's pickup (that lead-in is for a deliberate start/jump, not a tempo tweak).
-            engine.seekSong(toSection: section, playPickup: false)
+            guard performPlaybackStart({
+                try engine.startSong(song.playbackScaled())
+                try engine.seekSong(toSection: section, playPickup: false)
+            }) else { return }
             songPaused = false
             setPlaying(true)
         }

@@ -409,7 +409,9 @@ final class MetronomeEngine {
     /// callback continues from the preserved cursor. Used for Pause/Resume — distinct from `startSong`,
     /// which restarts from the top. No-op outside song mode.
     func resumeSong() throws {
-        guard !isManualRendering, songModeActive, currentSong != nil else { return }
+        guard !isManualRendering, songModeActive, currentSong != nil else {
+            throw TransportError.songNotReady
+        }
         try ensureRealtimeEngineRunning()
         control.withLock { $0.running = true }   // NO resetRequested → continue from atState
         setRunning(true)
@@ -423,8 +425,8 @@ final class MetronomeEngine {
     /// (`pickupTicks > 0 && startWithPickup`), that section's lead-in plays ONCE before its downbeat — a
     /// one-time count-in for starting/jumping there. It is never part of `songPlan`, so a continuous pass
     /// through the section never replays it.
-    func seekSong(toSection sectionIndex: Int, playPickup: Bool = true) {
-        guard !isManualRendering, songModeActive else { return }
+    func seekSong(toSection sectionIndex: Int, playPickup: Bool = true) throws {
+        guard !isManualRendering, songModeActive else { throw TransportError.songNotReady }
         let sr = configuredSampleRate
         // Under a tiny lock: resolve only cheap values (the target click, its downbeat frame, the section's
         // resolved speak-subdivisions). Building the RenderPlan-backed pre-roll happens OUTSIDE the lock, so
@@ -436,7 +438,7 @@ final class MetronomeEngine {
             let downbeat = target < plan.clickCount ? plan.frame(at: target) : plan.totalFrames
             return (s, target, downbeat, plan.speakSubdivisions(section: s))
         }
-        guard let resolved else { return }
+        guard let resolved else { throw TransportError.songNotReady }
         var preroll: SongPreroll?
         if playPickup, let song = currentSong, song.sections.indices.contains(resolved.s) {
             let section = song.sections[resolved.s]
@@ -446,7 +448,7 @@ final class MetronomeEngine {
                                       speakSubdivisions: resolved.speakSubs)
             }
         }
-        do { try ensureRealtimeEngineRunning() } catch { return }
+        try ensureRealtimeEngineRunning()
         control.withLock {
             $0.songSeekClickIndex = resolved.target
             $0.songPreroll = preroll
@@ -464,6 +466,8 @@ final class MetronomeEngine {
             try start()
         }
     }
+
+    private enum TransportError: Error { case songNotReady }
 
     func stop() {
         control.withLock { $0.running = false }

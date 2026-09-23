@@ -4,15 +4,20 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ios-validation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-test:
     name: Build & test (iOS Simulator)
     runs-on: macos-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -32,6 +37,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Validate bundled release resources
+        run: python3 tools/release_preflight.py
+
       # Pick a simulator that exists on the runner (name/OS vary by image),
       # so we don't hard-code an iPhone model that may not be installed.
       - name: Resolve a booted-capable iOS simulator
@@ -44,6 +52,7 @@ jobs:
           print(cands[0]['udid'] if cands else '')")
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           echo "Using simulator UDID: $UDID"
+          test -n "$UDID" || { echo "No available iPhone simulator"; exit 1; }
 
       - name: Build
         run: |
@@ -57,4 +66,14 @@ jobs:
           xcodebuild test \
             -scheme Metronome \
             -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath build/AccuracyTests.xcresult \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accuracy-test-results
+          path: build/AccuracyTests.xcresult
+          if-no-files-found: warn
+          retention-days: 14
