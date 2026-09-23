@@ -1,7 +1,22 @@
 import XCTest
+import CoreText
 @testable import Metronome
 
 final class SubdivisionNotationTests: XCTestCase {
+    func testBundledEngravingFontContainsEveryDisplayedNote() {
+        let font = CTFontCreateWithName("Bravura" as CFString, 32, nil)
+        XCTAssertEqual(CTFontCopyPostScriptName(font) as String, "Bravura")
+        for denominator in [1, 2, 4, 8, 16, 32, 64, 128] {
+            var character = SubdivisionNotation(denominator: denominator).smuflNote
+            var glyph: CGGlyph = 0
+            XCTAssertTrue(CTFontGetGlyphsForCharacters(font, &character, &glyph, 1))
+            XCTAssertNotNil(CTFontCreatePathForGlyph(font, glyph, nil))
+        }
+        var dot: UniChar = 0xE1E7
+        var glyph: CGGlyph = 0
+        XCTAssertTrue(CTFontGetGlyphsForCharacters(font, &dot, &glyph, 1))
+    }
+
     func testWrittenDurationMatchesEverySubdivision() {
         for denominator in [2, 4, 8, 16] {
             for numerator in [3, 4, 6, 9, 12] {

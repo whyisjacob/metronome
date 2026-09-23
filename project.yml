@@ -66,6 +66,8 @@ targets:
       # (Piper, voice en_US-joe-medium — OHF-Voice "joe" dataset, CC0; a male voice fine-tuned from lessac).
       - path: Resources/Voice
         buildPhase: resources
+      - path: Resources/Fonts
+        buildPhase: resources
       # Apple-required privacy manifest. Declared as a bundled resource so it lands at the app bundle ROOT
       # (Maelzel.app/PrivacyInfo.xcprivacy), where Apple looks for it. Declares the single required-reason
       # API the app touches (UserDefaults, reason CA92.1) and affirms no tracking / no data collection.
@@ -79,6 +81,8 @@ targets:
         # Home-screen name. Deliberately differs from the Xcode target/scheme name ("Metronome",
         # which CI's `-scheme Metronome` depends on) and from the App Store name (Apple-side).
         CFBundleDisplayName: Maelzel
+        UIAppFonts:
+          - Bravura.otf
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # A metronome uses no encryption beyond Apple-exempt OS APIs, so declare

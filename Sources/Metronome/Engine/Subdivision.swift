@@ -198,6 +198,21 @@ struct SubdivisionNotation: Equatable {
     var tupletCount: Int? = nil
     var tupletNormalCount: Int? = nil
 
+    /// SMuFL Individual Notes: complete note heads, stems and flags.
+    var smuflNote: UInt16 {
+        switch denominator {
+        case 1: return 0xE1D2
+        case 2: return 0xE1D3
+        case 4: return 0xE1D5
+        case 8: return 0xE1D7
+        case 16: return 0xE1D9
+        case 32: return 0xE1DB
+        case 64: return 0xE1DD
+        case 128: return 0xE1DF
+        default: preconditionFailure("Unsupported written note value")
+        }
+    }
+
     var flagCount: Int {
         switch denominator {
         case 8: return 1
