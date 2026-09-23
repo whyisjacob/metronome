@@ -91,6 +91,28 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
 }
 
 extension Subdivision {
+    /// The written value of one click. Ratios disambiguate tuplet members:
+    /// e.g. three eighths in the time of two, or five eighths in the time of three.
+    func notation(in meter: TimeSignature) -> SubdivisionNotation {
+        let d = meter.denominator
+        if meter.isCompound {
+            switch self {
+            case .quarter: return .init(denominator: d / 2, dotted: true)
+            case .eighth, .triplet: return .init(denominator: d)
+            case .sixteenth, .sextuplet: return .init(denominator: d * 2)
+            case .thirtysecond: return .init(denominator: d * 4)
+            case .quintuplet: return .init(denominator: d, tupletCount: 5, tupletNormalCount: 3)
+            case .septuplet: return .init(denominator: d * 2, tupletCount: 7, tupletNormalCount: 6)
+            }
+        }
+        switch self {
+        case .triplet: return .init(denominator: d * 2, tupletCount: 3, tupletNormalCount: 2)
+        case .quintuplet, .sextuplet, .septuplet:
+            return .init(denominator: d * 4, tupletCount: ticksPerBeat, tupletNormalCount: 4)
+        default: return .init(denominator: d * ticksPerBeat)
+        }
+    }
+
     /// The musically-truthful label for this subdivision **in the context of `signature`**.
     ///
     /// `Subdivision` is really *clicks-per-beat* (1, 2, 3, 4, …), so the note value each click represents
@@ -167,5 +189,28 @@ extension Subdivision {
         case 8:  return "⅛ beat"
         default: return "1/\(clicksPerBeat) beat"
         }
+    }
+}
+
+struct SubdivisionNotation: Equatable {
+    let denominator: Int
+    var dotted = false
+    var tupletCount: Int? = nil
+    var tupletNormalCount: Int? = nil
+
+    var flagCount: Int {
+        switch denominator {
+        case 8: return 1
+        case 16: return 2
+        case 32: return 3
+        case 64: return 4
+        case 128: return 5
+        default: return 0
+        }
+    }
+
+    var tupletRatio: String? {
+        guard let count = tupletCount, let normal = tupletNormalCount else { return nil }
+        return "\(count):\(normal)"
     }
 }

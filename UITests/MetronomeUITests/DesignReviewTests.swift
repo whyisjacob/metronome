@@ -1,6 +1,19 @@
 import XCTest
 
 final class DesignReviewTests: XCTestCase {
+    func testSubdivisionNotationCapture() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Maelzel"].waitForExistence(timeout: 30))
+        let last = app.buttons["subdivision-thirtysecond"]
+        for _ in 0..<6 where !last.isHittable { scrollMain(app) }
+        XCTAssertTrue(last.isHittable)
+        XCTAssertTrue(app.buttons["subdivision-triplet"].exists)
+        app.buttons["subdivision-sixteenth"].tap()
+        capture("Subdivision-note-values", app)
+    }
+
     func testACompoundTempoUnitCanBeChosenExplicitly() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
