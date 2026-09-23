@@ -583,6 +583,16 @@ final class MetronomeViewModel: ObservableObject {
         clampPickupToGrid()   // simple↔compound changes ticksPerBar (e.g. 6/8 → 2 beats)
     }
 
+    func setGroupedBeats(_ grouped: Bool) {
+        updateConfig { config in
+            let ts = TimeSignature(numerator: config.timeSignature.numerator,
+                                   denominator: config.timeSignature.denominator,
+                                   groupedBeats: grouped)
+            Self.applyMeter(ts, to: &config)
+        }
+        clampPickupToGrid()
+    }
+
     /// Applies a new meter: adopts its sensible default accents (compound-aware) and, on a simple↔compound
     /// switch, resets the subdivision to the main beat so a simple-meter subdivision isn't misread as a
     /// compound one (e.g. 4/4 eighths shouldn't carry over as 6/8 "eighths" = a triplet division).

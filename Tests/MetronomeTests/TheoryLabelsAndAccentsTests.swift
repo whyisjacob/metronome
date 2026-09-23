@@ -85,14 +85,14 @@ final class TheoryLabelsAndAccentsTests: XCTestCase {
         }
 
         // --- Fixed / verified this build ---
-        // 4/2 — compound-4 hierarchy, secondary on beat 3 (same shape as 4/4).
+        // 4/2 — simple quadruple hierarchy, secondary on beat 3 (same shape as 4/4).
         XCTAssertEqual(accents(4, 2), [.strong, .normal, .medium, .normal])
         XCTAssertEqual(accents(3, 2), [.strong, .normal, .normal])
         XCTAssertEqual(accents(2, 2), [.strong, .normal])
         // 12/8 — compound 4/4: secondary on the THIRD dotted-quarter beat, NOT a flat run of mediums.
         XCTAssertEqual(accents(12, 8), [.strong, .normal, .medium, .normal])
-        // 6/4 — felt in two: secondary on beat 4.
-        XCTAssertEqual(accents(6, 4), [.strong, .normal, .normal, .medium, .normal, .normal])
+        // 6/4 — two dotted-half beats.
+        XCTAssertEqual(accents(6, 4), [.strong, .medium])
 
         // --- Must be UNCHANGED (regression guards) ---
         XCTAssertEqual(accents(4, 4), [.strong, .normal, .medium, .normal])
@@ -109,13 +109,13 @@ final class TheoryLabelsAndAccentsTests: XCTestCase {
     /// 6/4 and 12/8 are the meters whose DEFAULT accents changed. Accents pick a click's LOUDNESS, never its
     /// onset frame, so the rendered onsets must (a) be identical whether we use the new default accents or a
     /// flat all-`.normal` pattern, and (b) sit exactly on the first-principles grid — a main beat lasts
-    /// `60/BPM` seconds (a dotted quarter in 12/8 — the compound convention; a quarter in 6/4), so beat `k`
+    /// `60/BPM` seconds (a dotted quarter in 12/8 — the compound convention; a dotted half in 6/4), so beat `k`
     /// is due at `round(k · 60/BPM · sampleRate)`. The grid is hand-derived here; nothing is read back from
     /// `RenderPlan`/`SongPlan`. This mirrors the discipline of `OfflineRenderAccuracyTests`.
     func testAccentDefaultChangesDoNotMoveClickPositions() throws {
         struct Case { let bpm: Double; let ts: TimeSignature; let mainBeats: Int }
         let cases = [
-            Case(bpm: 120, ts: TimeSignature(numerator: 6, denominator: 4), mainBeats: 6),
+            Case(bpm: 120, ts: TimeSignature(numerator: 6, denominator: 4), mainBeats: 2),
             Case(bpm: 138, ts: TimeSignature(numerator: 12, denominator: 8), mainBeats: 4),
         ]
 

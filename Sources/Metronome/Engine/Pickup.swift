@@ -19,16 +19,11 @@ import Foundation
 /// a 3-tick dotted quarter) also work with no special-casing.
 ///
 /// ## Accents & sound
-/// The pickup ticks are the bar's TAIL, which never includes tick 0, so they are inherently non-`strong`
-/// (they inherit the bar's real tail accents — e.g. a 7/8 2+2+3 group head stays `medium`), and the first
-/// real downbeat after the pickup is `strong`. The "different tune" is a distinct **timbre/pitch at the
-/// tick's natural (weak/normal/medium) gain** — never louder — applied by the engine to pickup ticks.
+/// Pickup ticks inherit the selected tail accents, which users can override. A distinct
+/// timbre identifies this one-time partial-bar lead-in. The first full bar follows it.
 ///
-/// ## Looping — once only
-/// In notation an anacrusis borrows its length from the incomplete FINAL bar of the phrase; a metronome
-/// has no final bar to borrow from, so replaying the pickup each cycle would inject phantom beats and
-/// corrupt the bar length — the one thing a metronome must never do. So the pickup plays exactly ONCE
-/// (only playback ticks `0 … ticks−1`); after the first downbeat the metronome loops the full bar.
+/// This practice lead-in does not edit the score's final measure or encode repeat-form
+/// conventions; full-bar count-ins are a separate feature.
 struct Pickup: Equatable {
     /// Pickup length in CURRENT-GRID TICKS (0 = off). The UI clamps this to `1 … ticksPerBar−1`;
     /// `effectiveTicks(ticksPerBar:)` re-clamps defensively so a stale value can never reach a full bar.

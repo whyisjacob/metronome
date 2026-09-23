@@ -16,11 +16,14 @@ struct SubdivisionControlView: View {
 
     var body: some View {
         Card("Subdivision") {
+            Text("Clicks per beat")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(options) { option in
                     Button(action: { viewModel.setSubdivision(option) }) {
                         VStack(spacing: 2) {
-                            Text(option.symbol)
+                            Text("\(option.ticksPerBeat(compound: isCompound))")
                                 .font(.system(size: 20, weight: .bold))
                             Text(option.displayName(in: viewModel.timeSignature))
                                 .font(.system(size: 11, weight: .semibold))
@@ -33,7 +36,7 @@ struct SubdivisionControlView: View {
                 }
             }
             if isCompound {
-                Text("Compound meter — felt in \(viewModel.timeSignature.beatsPerBar). Main beat clicks the dotted-quarter pulse; Eighths adds the 3-per-beat pulse.")
+                Text("Each \(viewModel.timeSignature.beatUnitName.lowercased()) divides into three \(viewModel.timeSignature.denominatorNoteName.lowercased())s.")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
             }

@@ -99,7 +99,7 @@ struct SongSectionEditorView: View {
                         Card("Groove") { GrooveControlView(viewModel: editVM) }
 
                         // Count-in: the SAME shared control as the main screen, in this section's grid.
-                        Card("Count-in") {
+                        Card("Pickup") {
                             CountInControlView(viewModel: editVM)
                             if editVM.pickupTicks > 0 {
                                 Toggle(isOn: $startWithPickup) {

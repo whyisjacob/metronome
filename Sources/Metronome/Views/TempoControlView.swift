@@ -16,6 +16,10 @@ struct TempoControlView: View {
                     .foregroundStyle(Theme.textSecondary)
             }
 
+            Text("\(viewModel.timeSignature.beatUnitName) = \(Int(viewModel.bpm.rounded()))")
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textSecondary)
+
             Slider(
                 value: Binding(get: { viewModel.bpm }, set: { viewModel.setBPM($0) }),
                 in: MetronomeConfiguration.tempoRange,

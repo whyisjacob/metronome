@@ -16,7 +16,7 @@ final class IndependentTimingMathTests: XCTestCase {
             for bpm in [30, 59, 60, 97, 137, 299, 300] {
                 for top in 1...32 {
                     for bottom in [2, 4, 8, 16] {
-                        let compound = bottom == 8 && top >= 6 && top % 3 == 0
+                        let compound = top >= 6 && top % 3 == 0
                         for (division, simpleTicks, compoundTicks) in divisions {
                             let ticks = compound ? compoundTicks : simpleTicks
                             let config = MetronomeConfiguration(bpm: Double(bpm),

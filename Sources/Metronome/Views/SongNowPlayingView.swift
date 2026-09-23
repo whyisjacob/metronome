@@ -51,7 +51,7 @@ struct SongNowPlayingView: View {
                     Text(section.name)
                         .font(.system(size: 22, weight: .bold, design: .default))
                         .foregroundStyle(Theme.accentNormal)
-                    Text("\(song.resultingBPM(section.tempoBPM)) BPM · \(section.meterAndFeel)")
+                    Text("\(song.resultingBPM(section.tempoBPM)) BPM (\(section.timeSignature.beatUnitName.lowercased())) · \(section.meterAndFeel)")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Text("Bar \(min(viewModel.currentSongBar, section.totalBars)) of \(section.totalBars)")

@@ -14,7 +14,7 @@ struct CountInControlView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if viewModel.maxPickupTicks < 1 {
-                Text("This grid is too short for a count-in. Choose a meter with at least 2 beats per bar.")
+                Text("A pickup needs at least two clicks per bar. Add a subdivision or choose a longer meter.")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -37,9 +37,9 @@ struct CountInControlView: View {
     private var caption: String {
         let tokens = viewModel.pickupPreviewTokens
         guard !tokens.isEmpty else {
-            return "Off — playback starts on the downbeat. Add a count-in for a lead-in before beat 1."
+            return "Off — playback starts on beat 1. A pickup plays the end of a partial bar before it."
         }
-        return "Counts “\(tokens.joined(separator: " "))” then the strong downbeat “1” — once, then the bar "
+        return "Counts “\(tokens.joined(separator: " "))” then beat “1” — once, then the bar "
             + "loops. The lead-in uses a distinct, softer tone so you hear it as a pickup."
     }
 }
@@ -54,7 +54,7 @@ private struct CountInStepperRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("COUNT-IN")
+            Text("PICKUP")
                 .font(.system(size: 12, weight: .bold)).tracking(1.1)
                 .foregroundStyle(Theme.textSecondary)
             Spacer(minLength: 8)
@@ -65,7 +65,7 @@ private struct CountInStepperRow: View {
             }
             .buttonStyle(PillButtonStyle())
             .disabled(ticks <= 0)
-            .accessibilityLabel("Shorter count-in")
+            .accessibilityLabel("Shorter pickup")
 
             Text(label)
                 .font(.system(size: 16, weight: .bold, design: .default))
@@ -80,7 +80,7 @@ private struct CountInStepperRow: View {
             }
             .buttonStyle(PillButtonStyle())
             .disabled(ticks >= maxTicks)
-            .accessibilityLabel("Longer count-in")
+            .accessibilityLabel("Longer pickup")
         }
     }
 }

@@ -94,7 +94,7 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
             SongSection(name: spec.name,
                         tempoBPM: spec.bpm,
                         timeSignature: TimeSignature(numerator: spec.numerator,
-                                                     denominator: spec.denominator),
+                                                     denominator: spec.denominator, groupedBeats: false),
                         subdivision: spec.subdivision,
                         // Oracle uses boolean accents; map to the engine's `BeatAccent` for the real song.
                         accentPattern: spec.accents.map { $0 ? BeatAccent.strong : .normal },
@@ -123,7 +123,7 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
     /// A second, harder map: a subdivision change into fast sixteenths and a section with repeats, plus
     /// three distinct tempos. Fastest interval is the sixteenth at 132 BPM ≈ 114 ms — still safe.
     ///
-    /// All three sections are SIMPLE meters (5/8 is odd but not compound; 6/4 is duple-simple), so the
+    /// All three sections explicitly count denominator notes (including six quarters in 6/4), so the
     /// subdivision's musical ticks-per-beat is the grid — compound meters have their own dedicated
     /// dotted-quarter accuracy tests in `OfflineRenderAccuracyTests`.
     func testSubdivisionAndRepeatSongMatchesIndependentGrid() throws {

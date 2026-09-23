@@ -55,10 +55,9 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
         }
     }
 
-    /// The subdivisions offered in a **compound** meter: the dotted-quarter beat itself, its eighths (the
-    /// compound pulse), and its sixteenths. Triplet/tuplets/32nd are hidden there — they don't add a
-    /// distinct division of a dotted quarter.
-    static let compoundCases: [Subdivision] = [.quarter, .eighth, .sixteenth]
+    /// Distinct divisions of a compound beat. Three and six have existing aliases;
+    /// five, seven and twelve are also musically valid divisions.
+    static let compoundCases: [Subdivision] = [.quarter, .eighth, .sixteenth, .quintuplet, .septuplet, .thirtysecond]
 
     /// Display name of the subdivision as heard in a compound meter (where `.quarter` is the main beat and
     /// `.eighth` is the three-per-beat pulse).
@@ -117,9 +116,15 @@ extension Subdivision {
     /// real note value from `beat unit ÷ clicks-per-beat`, so the label always tells the musical truth —
     /// e.g. in 4/2 "one click per beat" is a **Half** note (not a Quarter); in 3/8 it is an **Eighth**.
     func displayName(in signature: TimeSignature) -> String {
-        // Compound meters (6/8, 9/8, 12/8): the beat is a dotted quarter and `compoundDisplayName` already
-        // tells the truth (Main beat / Eighths / Sixteenths). Keep that behaviour, don't regress it.
-        guard !signature.isCompound else { return compoundDisplayName }
+        if signature.isCompound {
+            switch self {
+            case .quarter: return "Main beat"
+            case .eighth, .triplet: return Self.pluralNoteName(signature.denominator)
+            case .sixteenth, .sextuplet: return Self.pluralNoteName(signature.denominator * 2)
+            case .thirtysecond: return Self.pluralNoteName(signature.denominator * 4)
+            case .quintuplet, .septuplet: return displayName
+            }
+        }
 
         // Simple meter: the beat is the denominator note (2 → half, 4 → quarter, 8 → eighth, 16 → 16th).
         let beatDenominator = signature.denominator
@@ -137,6 +142,17 @@ extension Subdivision {
             // Higher tuplets are named by their count (N per beat) — already beat-relative and true in any
             // meter; a single note value for a 5/6/7-tuplet would be ambiguous.
             return displayName
+        }
+    }
+
+    private static func pluralNoteName(_ denominator: Int) -> String {
+        switch denominator {
+        case 2: return "Halves"
+        case 4: return "Quarters"
+        case 8: return "Eighths"
+        case 16: return "Sixteenths"
+        case 32: return "32nds"
+        default: return "1/\(denominator) notes"
         }
     }
 

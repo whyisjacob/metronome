@@ -1,6 +1,26 @@
 import XCTest
 
 final class DesignReviewTests: XCTestCase {
+    func testCompoundTempoUnitCanBeChosenExplicitly() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Maelzel"].waitForExistence(timeout: 30))
+        let numerator = app.pickerWheels["Time signature numerator"]
+        for _ in 0..<5 where !numerator.isHittable { app.swipeUp() }
+        XCTAssertTrue(numerator.isHittable)
+        numerator.adjust(toPickerWheelValue: "6")
+        let unit = app.segmentedControls["tempo-beat-unit"]
+        for _ in 0..<3 where !unit.isHittable { app.swipeUp() }
+        XCTAssertTrue(unit.waitForExistence(timeout: 5))
+        XCTAssertTrue(unit.buttons["Dotted half"].isSelected)
+        XCTAssertTrue(app.staticTexts["2 beats per bar · dotted half beat"].exists)
+        capture("Theory-6-4-grouped", app)
+        unit.buttons["Quarter note"].tap()
+        XCTAssertTrue(app.staticTexts["6 beats per bar · quarter note beat"].exists)
+        capture("Theory-6-4-quarter", app)
+    }
+
     func testAllVisualStylesRemainAvailable() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

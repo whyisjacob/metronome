@@ -86,7 +86,7 @@ struct ContentView: View {
 
                         // Count-in / pickup: a primary control (moved out of Settings), so a lead-in sits
                         // with the base controls (CountInControlView is card-less — wrap it here).
-                        Card("Count-in") {
+                        Card("Pickup") {
                             CountInControlView(viewModel: viewModel)
                         }
 
