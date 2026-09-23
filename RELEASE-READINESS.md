@@ -28,13 +28,13 @@ test or a complete accessibility audit.
 - Workflow YAML parsing and `git diff --check`: passed.
 - New regressions cover unrelated JSON, malformed wrappers, valid legacy/empty song imports,
   audio failure state and successful retry.
-- macOS compilation and XCTest: **276 tests passed, zero failures**, using Xcode 26.6 on source
-  revision `d27135f`. [Successful build and test run](https://github.com/whyisjacob/metronome/actions/runs/35887401200).
-- Fresh simulator screenshots: **not verified**. The
-  [capture attempt](https://github.com/whyisjacob/metronome/actions/runs/35887210311) stalled during
-  simulator boot before capturing screens and was cancelled. The workflow now bounds startup to
-  10 minutes, bounds the entire job to 30 minutes, and stops on boot-status failures. Re-run on a
-  healthy macOS runner before using new store images.
+- macOS compilation and XCTest: **281 tests passed, zero failures**, using Xcode 26.6 on source
+  revision `6f5828d`. [Successful build and test run](https://github.com/whyisjacob/metronome/actions/runs/35889290043).
+- Fresh design captures: **passed and visually inspected** on the iPhone 17 Pro simulator. The
+  [UI test](https://github.com/whyisjacob/metronome/actions/runs/35889284166) selects all four indicator
+  styles and captures nine screens. These are design-review images, not finished App Store artwork.
+- See [MATH-AND-DESIGN-REVIEW.md](MATH-AND-DESIGN-REVIEW.md) for the fractional song-boundary fix,
+  independent arithmetic checks, corrected scaled durations and interface changes.
 - Source/project review found no network or analytics dependency in the shipping target. The privacy
   manifest declares no collection or tracking; UserDefaults reason CA92.1 and
   `ITSAppUsesNonExemptEncryption: false` are present. Smart Import camera/photo code is excluded.
