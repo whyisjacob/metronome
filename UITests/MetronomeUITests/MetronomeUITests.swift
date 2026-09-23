@@ -16,8 +16,8 @@ import XCTest
 ///    simulator's real-time audio engine may not start — and `MetronomeViewModel.start()` deliberately
 ///    stays stopped (does not flip `isPlaying`) when it can't, so a "running" state isn't reliable there.
 ///    The beat visual is drawn even when stopped (idle pattern), so the hero shot still shows it. Song
-///    playback is different: `playSong(...)` is explicitly headless-safe (it sets its state regardless of
-///    whether the engine started), so the song now-playing screen is reliably reachable.
+///    playback still loads the song if audio cannot start, but correctly remains stopped and displays an
+///    error. A screenshot alone is not evidence that audio playback succeeded.
 ///
 /// Labels used below were verified against the current views (Sept 2026):
 ///   header `Text("MAELZEL")`; tab `Songs`; nav bars `Songs` / `Edit Song` / `Settings`; buttons

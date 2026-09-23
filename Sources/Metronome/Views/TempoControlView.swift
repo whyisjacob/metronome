@@ -22,6 +22,8 @@ struct TempoControlView: View {
                 step: 1
             )
             .tint(Theme.accentNormal)
+            .accessibilityLabel("Tempo")
+            .accessibilityValue("\(Int(viewModel.bpm.rounded())) beats per minute")
 
             HStack(spacing: 12) {
                 nudge("−1", -1)
@@ -31,6 +33,8 @@ struct TempoControlView: View {
                         .frame(maxWidth: .infinity, minHeight: 50)
                 }
                 .buttonStyle(PillButtonStyle())
+                .accessibilityLabel("Tap tempo")
+                .accessibilityHint("Tap repeatedly in time to set the tempo")
                 nudge("+1", +1)
             }
         }
@@ -43,5 +47,6 @@ struct TempoControlView: View {
                 .frame(width: 74, height: 50)
         }
         .buttonStyle(PillButtonStyle())
+        .accessibilityLabel(delta < 0 ? "Decrease tempo by one" : "Increase tempo by one")
     }
 }
