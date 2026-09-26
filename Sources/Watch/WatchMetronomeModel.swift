@@ -123,15 +123,16 @@ final class WatchMetronomeModel: ObservableObject {
         UserDefaults.standard.set(output.rawValue, forKey: "watchOutput")
         do {
             if output == .voice {
-                engine.setSpeakSubdivisions(false)
-                engine.setClickMuted(true)
+                engine.setSpeakSubdivisions(true)
+                // Fast or unmapped subdivision syllables fall back to clicks, just like iPhone.
+                engine.setClickMuted(false)
                 engine.setVoiceMuted(false)
                 lastPulse = engine.currentPulse.sequence
                 if var song = snapshot.song?.playbackScaled() {
                     song.voiceEnabled = true
                     for i in song.sections.indices {
                         song.sections[i].voiceEnabled = true
-                        song.sections[i].speakSubdivisions = false
+                        song.sections[i].speakSubdivisions = true
                     }
                     try engine.startSong(song)
                 } else {
@@ -178,7 +179,7 @@ final class WatchMetronomeModel: ObservableObject {
             lastSerial = beat.serial
             count = beat.number; bar = beat.bar; sectionIndex = beat.section ?? 0; leadIn = beat.leadIn
             // Suppress a late haptic rather than firing a burst after a delayed main-thread tick.
-            if elapsed - beat.time < 0.10, foreground { WKInterfaceDevice.current().play(.click) }
+            if elapsed - beat.time < 0.10, foreground, !beat.muted { WKInterfaceDevice.current().play(.click) }
         }
     }
 

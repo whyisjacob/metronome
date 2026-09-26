@@ -22,6 +22,9 @@ struct WatchMetronomeView: View {
                         Text(model.leadIn ? "Lead-in" : model.currentConfig.timeSignature.displayString)
                             .font(.caption2).foregroundStyle(.secondary)
                         Spacer()
+                        Text("\(model.currentConfig.ticksPerBeat)×")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .accessibilityLabel("\(model.currentConfig.ticksPerBeat) clicks per beat")
                         Button { showSettings = true } label: { Image(systemName: "gearshape") }
                             .buttonStyle(.plain).accessibilityLabel("Settings")
                     }
@@ -57,6 +60,8 @@ struct WatchMetronomeView: View {
             .sheet(isPresented: $showSettings) {
                 Form {
                     if model.snapshot?.song != nil { Text(model.title).font(.headline) }
+                    Text("Subdivision: \(model.currentConfig.subdivision.displayName(in: model.currentConfig.timeSignature))")
+                        .font(.footnote)
                     Picker("Beat output", selection: $model.output) {
                         ForEach(WatchOutput.allCases, id: \.self) { Text($0.title).tag($0) }
                     }.disabled(model.isPlaying)

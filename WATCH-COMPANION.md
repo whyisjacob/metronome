@@ -8,6 +8,8 @@ The watch shows a large beat number, meter, Start/Stop, and ± tempo. For a song
 
 ## Runtime limits
 
+Subdivision follows the phone in both output modes, including song section changes and pickups. The watch header shows clicks per beat (for example, 2×); Settings shows the subdivision name. Spoken output counts mapped syllables and falls back to clicks when syllables cannot fit or are unavailable. Vibration follows the full grid and respects muted beats and rhythm cells; very fast grids may exceed the watch hardware's ability to produce distinct taps. Stop and Start applies phone changes received during playback.
+
 - Vibration uses the watch’s haptic engine while the app is active. Lowering the wrist or leaving the app stops vibration; the screen explicitly reports this. No fake workout, silent background audio, or unrelated extended-runtime category is used.
 - Spoken count uses bundled voice clips and the existing audio engine on the watch. Background audio is declared for this audible mode. The system chooses speaker/headphone routing; physical-device verification is still required.
 - A live connection is required for starting a handoff and editing synchronized settings. Once playing, losing the phone connection does not change the watch’s beat clock. Stop is local immediately; a token-scoped release is delivered when connectivity returns.
