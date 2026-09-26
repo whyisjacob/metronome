@@ -1,6 +1,9 @@
 name: Watch companion preview
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/watch-preview.yml'
 permissions:
   contents: read
 jobs:
