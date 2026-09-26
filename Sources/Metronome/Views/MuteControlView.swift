@@ -35,7 +35,7 @@ struct MuteControlView: View {
                                 Image(systemName: preset.symbolName)
                                     .font(.system(size: 15, weight: .bold))
                                 Text(preset.displayName)
-                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    .font(.system(size: 12, weight: .semibold, design: .default))
                             }
                             .frame(maxWidth: .infinity, minHeight: 48)
                         }
@@ -77,7 +77,7 @@ struct MuteControlView: View {
                              _ toggle: @escaping (Bool) -> Void) -> some View {
         Button { toggle(!on) } label: {
             Text(title)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(.system(size: 13, weight: .semibold, design: .default))
                 .frame(maxWidth: .infinity, minHeight: 38)
         }
         .buttonStyle(SelectableStyle(isOn: on))

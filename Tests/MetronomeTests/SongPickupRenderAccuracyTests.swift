@@ -14,6 +14,66 @@ final class SongPickupRenderAccuracyTests: XCTestCase {
 
     private let sampleRate = 44_100.0
 
+    func testReplayWithLeadInIgnoresPreviousCompletion() throws {
+        let section = SongSection(name: "A", tempoBPM: 120, timeSignature: .common,
+                                  subdivision: .quarter, bars: 1)
+        let song = Song(name: "Replay", sections: [section], pickupTicks: 2)
+        let engine = MetronomeEngine()
+        try engine.prepareForOfflineRendering(sampleRate: sampleRate)
+        defer { engine.teardownOfflineRendering() }
+
+        // Repeat to cover replay after replay, not just the first launch.
+        for _ in 0..<3 {
+            _ = try engine.renderOfflineSong(song)
+            let finished = engine.currentPulse
+            XCTAssertTrue(finished.songFinished)
+            XCTAssertTrue(engine.isCurrentSongPulse(finished))
+
+            // A fresh lead-in emits sound before any section pulse. The previous completion
+            // still occupies the pulse slot, but must not stop this new playback request.
+            let leadIn = try engine.renderOfflineSong(song, frameLimit: 512)
+            XCTAssertTrue(leadIn.contains { abs($0) > 0.001 })
+            XCTAssertFalse(engine.isCurrentSongPulse(finished))
+            XCTAssertFalse(engine.isCurrentSongPulse(engine.currentPulse))
+        }
+    }
+
+    func testReplayWithoutLeadInPublishesFreshFirstBeat() throws {
+        let song = Song(name: "Replay", sections: [SongSection(name: "A", bars: 1)])
+        let engine = MetronomeEngine()
+        try engine.prepareForOfflineRendering(sampleRate: sampleRate)
+        defer { engine.teardownOfflineRendering() }
+        _ = try engine.renderOfflineSong(song)
+        let finished = engine.currentPulse
+        _ = try engine.renderOfflineSong(song, frameLimit: 512)
+        let restarted = engine.currentPulse
+        XCTAssertFalse(engine.isCurrentSongPulse(finished))
+        XCTAssertTrue(engine.isCurrentSongPulse(restarted))
+        XCTAssertFalse(restarted.songFinished)
+        XCTAssertEqual(restarted.sectionIndex, 0)
+        XCTAssertEqual(restarted.barInSection, 0)
+        XCTAssertEqual(restarted.beatIndex, 0)
+    }
+
+    func testSeekingDuringLeadInDiscardsTheOldPickup() throws {
+        let a = SongSection(name: "A", tempoBPM: 120, timeSignature: .common,
+                            subdivision: .quarter, bars: 2)
+        let b = SongSection(name: "B", tempoBPM: 120, timeSignature: .common,
+                            subdivision: .quarter, bars: 1, pickupTicks: 2)
+        let song = Song(name: "Lead-in navigation", sections: [a, b])
+        let engine = MetronomeEngine()
+        try engine.prepareForOfflineRendering(sampleRate: sampleRate)
+        defer { engine.teardownOfflineRendering() }
+
+        for target in [0, 1] {
+            let expected = try engine.renderOfflineSongSeeking(song, toSection: target, playPickup: false)
+            let actual = try engine.renderOfflineSongSeeking(song, toSection: target, playPickup: false,
+                                                            interruptingPickupAtSection: 1)
+            XCTAssertEqual(actual, expected,
+                           "Skipping a lead-in or going back must sound exactly like a clean downbeat start")
+        }
+    }
+
     private func peak(_ samples: [Float], at frame: Int, window: Int = 400) -> Float {
         let start = max(0, frame - 32), end = min(frame + window, samples.count)
         var p: Float = 0

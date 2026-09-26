@@ -61,8 +61,10 @@ struct Song: Identifiable, Equatable, Codable {
     /// Total duration in seconds at the CURRENT master tempo scale (faster scale ⇒ shorter). The section
     /// sum is `totalTicks × secondsPerTick` at each section's own BPM, divided by the scale.
     var durationSeconds: Double {
-        let base = sections.reduce(0) { $0 + Double($1.totalTicks) * $1.secondsPerTick }
-        return tempoScale > 0 ? base / tempoScale : base
+        // Playback rounds and clamps each scaled BPM; dividing the original duration by the
+        // scale disagrees with what actually plays, especially near the 30/300 BPM limits.
+        let playback = playbackScaled()
+        return playback.sections.reduce(0) { $0 + Double($1.totalTicks) * $1.secondsPerTick }
     }
 
     // MARK: - Master tempo scale (non-destructive)

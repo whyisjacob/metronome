@@ -1,22 +1,27 @@
-# Metronome
+# Maelzel
 
-An accuracy-first musician's metronome for iOS. v1 is a single, excellent, **sample-accurate**
-metronome. The whole point is timing that does not drift — the click grid is derived from the
+An accuracy-first musician's metronome and song practice app for iPhone (iOS 17+).
+The click grid is derived from the
 audio hardware clock, never from `Timer`/`DispatchQueue`.
 
 ## Features (v1)
 
 - **Tempo 30–300 BPM** — large stepper/dial, fine ±1, and **tap tempo** (averages the last taps,
   discards outliers).
-- **Transport** — start/stop.
-- **Time signature** — numerator 1–16, denominator ∈ {2, 4, 8, 16}.
-- **Subdivisions** — quarter, eighth, triplet, sixteenth.
+- **Transport** — start/stop, plus pause/resume and section navigation for songs.
+- **Time signature** — numerator 1–32, with simple, compound and odd meters.
+- **Subdivisions** — quarter, eighth, triplet, sixteenth, quintuplet, sextuplet, septuplet and 32nd.
 - **Accent pattern** — per-beat accents; downbeat accented by default; tap any beat to toggle.
 - **Sounds generated in code** — an enveloped "tock" (accent), "tick" (beat), and a soft
-  subdivision click. No audio files required; the sound set is structured so more can be added.
+  subdivision click, plus bundled spoken counting samples.
 - **Visual beat indicator** — pulses in sync with the audio, stronger on the accent.
 - **Background audio** — keeps clicking with the screen locked / app backgrounded, mixes with
   other audio, and keeps the screen awake while playing.
+- **Song builder** — saved tempo maps, section repeats, pickup beats, voice overrides, master tempo scaling,
+  JSON / `.maelzelsong` sharing and import, and local backup recovery.
+- **Practice controls** — swing, rhythm cells, gap trainer, count-in, recent settings and independent
+  click/voice/visual output channels.
+- **Visuals** — ball, dots, counter, ring and optional border flash.
 
 ## The accuracy core
 
@@ -66,8 +71,17 @@ xcodebuild -scheme Metronome \
 
 CI runs exactly this on every push — see [`.github/workflows/ios.yml`](.github/workflows/ios.yml).
 
-## Roadmap
+## Release preparation
 
-See [ROADMAP.md](ROADMAP.md). The headline post-v1 feature is a **Song Builder / tempo-map**
-(time signature *and* tempo changing mid-piece, auto-advancing bar-by-bar) — deferred so the
-timing engine lands first, since everything else builds on it.
+Run `python tools/release_preflight.py` on Windows or macOS to validate bundled voice samples,
+the app icon and privacy manifest. This does not replace compilation or simulator/device tests.
+
+Every push runs the iOS build and unit/accuracy suite on macOS. The manual TestFlight workflow
+also runs that suite on the selected revision and cannot upload unless it passes. Test results
+are retained as an `accuracy-test-results` artifact. TestFlight additionally checks the installed
+iOS SDK meets the current submission minimum.
+
+See [RELEASE-READINESS.md](RELEASE-READINESS.md) for the evaluation, validation evidence and remaining
+submission steps. Photo Smart Import remains excluded. The Apple Watch companion supports automatic
+paired-device sync, local vibration/spoken counting, and minimal playback controls. See
+[WATCH-COMPANION.md](WATCH-COMPANION.md) for setup, runtime limits, and device acceptance checks.

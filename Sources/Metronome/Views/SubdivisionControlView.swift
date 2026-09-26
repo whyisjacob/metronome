@@ -20,20 +20,22 @@ struct SubdivisionControlView: View {
                 ForEach(options) { option in
                     Button(action: { viewModel.setSubdivision(option) }) {
                         VStack(spacing: 2) {
-                            Text(option.symbol)
-                                .font(.system(size: 20, weight: .bold))
+                            SubdivisionNotationView(notation: option.notation(in: viewModel.timeSignature))
                             Text(option.displayName(in: viewModel.timeSignature))
                                 .font(.system(size: 11, weight: .semibold))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .frame(maxWidth: .infinity, minHeight: 72)
                     }
                     .buttonStyle(SelectableStyle(isOn: viewModel.subdivision == option))
+                    .accessibilityLabel(option.displayName(in: viewModel.timeSignature))
+                    .accessibilityValue("\(option.ticksPerBeat(compound: isCompound)) clicks per beat")
+                    .accessibilityIdentifier("subdivision-\(option.rawValue)")
                 }
             }
             if isCompound {
-                Text("Compound meter — felt in \(viewModel.timeSignature.beatsPerBar). Main beat clicks the dotted-quarter pulse; Eighths adds the 3-per-beat pulse.")
+                Text("Each \(viewModel.timeSignature.beatUnitName.lowercased()) divides into three \(viewModel.timeSignature.denominatorNoteName.lowercased())s.")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
             }

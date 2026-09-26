@@ -39,8 +39,7 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
     ///   * `.triplet`  → 3 — same three-per-beat division (offered as an alias).
     ///   * `.sixteenth`→ 6 — compound sixteenths.
     ///   * `.thirtysecond` → 12.
-    /// Simple meters are unchanged (`ticksPerBeat`). Tuplets are only offered in simple meters (they are
-    /// not in `compoundCases`), so they fall through to their simple tick count.
+    /// Simple meters are unchanged (`ticksPerBeat`). Five and seven divide either beat evenly.
     func ticksPerBeat(compound: Bool) -> Int {
         guard compound else { return ticksPerBeat }
         switch self {
@@ -49,31 +48,15 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
         case .triplet:      return 3
         case .sixteenth:    return 6
         case .thirtysecond: return 12
-        case .quintuplet:   return 5   // not offered in compound; keep the simple meaning if forced
+        case .quintuplet:   return 5
         case .sextuplet:    return 6
         case .septuplet:    return 7
         }
     }
 
-    /// The subdivisions offered in a **compound** meter: the dotted-quarter beat itself, its eighths (the
-    /// compound pulse), and its sixteenths. Triplet/tuplets/32nd are hidden there — they don't add a
-    /// distinct division of a dotted quarter.
-    static let compoundCases: [Subdivision] = [.quarter, .eighth, .sixteenth]
-
-    /// Display name of the subdivision as heard in a compound meter (where `.quarter` is the main beat and
-    /// `.eighth` is the three-per-beat pulse).
-    var compoundDisplayName: String {
-        switch self {
-        case .quarter:      return "Main beat"
-        case .eighth:       return "Eighths"
-        case .sixteenth:    return "Sixteenths"
-        case .triplet:      return "Eighths"
-        case .thirtysecond: return "32nds"
-        case .quintuplet:   return "Quintuplet"   // not shown in the compound picker
-        case .sextuplet:    return "Sextuplet"
-        case .septuplet:    return "Septuplet"
-        }
-    }
+    /// Distinct divisions of a compound beat. Three and six have existing aliases;
+    /// five, seven and twelve are also musically valid divisions.
+    static let compoundCases: [Subdivision] = [.quarter, .eighth, .sixteenth, .quintuplet, .septuplet, .thirtysecond]
 
     /// The bare note-value name **assuming the beat is a quarter note** — literally correct only in ×/4
     /// meters. Kept for internal use and the accuracy-test failure labels; for anything shown to the user
@@ -108,6 +91,28 @@ enum Subdivision: String, CaseIterable, Identifiable, Codable, Hashable {
 }
 
 extension Subdivision {
+    /// The written value of one click. Ratios disambiguate tuplet members:
+    /// e.g. three eighths in the time of two, or five eighths in the time of three.
+    func notation(in meter: TimeSignature) -> SubdivisionNotation {
+        let d = meter.denominator
+        if meter.isCompound {
+            switch self {
+            case .quarter: return .init(denominator: d / 2, dotted: true)
+            case .eighth, .triplet: return .init(denominator: d)
+            case .sixteenth, .sextuplet: return .init(denominator: d * 2)
+            case .thirtysecond: return .init(denominator: d * 4)
+            case .quintuplet: return .init(denominator: d, tupletCount: 5, tupletNormalCount: 3)
+            case .septuplet: return .init(denominator: d * 2, tupletCount: 7, tupletNormalCount: 6)
+            }
+        }
+        switch self {
+        case .triplet: return .init(denominator: d * 2, tupletCount: 3, tupletNormalCount: 2)
+        case .quintuplet, .sextuplet, .septuplet:
+            return .init(denominator: d * 4, tupletCount: ticksPerBeat, tupletNormalCount: 4)
+        default: return .init(denominator: d * ticksPerBeat)
+        }
+    }
+
     /// The musically-truthful label for this subdivision **in the context of `signature`**.
     ///
     /// `Subdivision` is really *clicks-per-beat* (1, 2, 3, 4, …), so the note value each click represents
@@ -117,9 +122,15 @@ extension Subdivision {
     /// real note value from `beat unit ÷ clicks-per-beat`, so the label always tells the musical truth —
     /// e.g. in 4/2 "one click per beat" is a **Half** note (not a Quarter); in 3/8 it is an **Eighth**.
     func displayName(in signature: TimeSignature) -> String {
-        // Compound meters (6/8, 9/8, 12/8): the beat is a dotted quarter and `compoundDisplayName` already
-        // tells the truth (Main beat / Eighths / Sixteenths). Keep that behaviour, don't regress it.
-        guard !signature.isCompound else { return compoundDisplayName }
+        if signature.isCompound {
+            switch self {
+            case .quarter: return "Main beat"
+            case .eighth, .triplet: return Self.pluralNoteName(signature.denominator)
+            case .sixteenth, .sextuplet: return Self.pluralNoteName(signature.denominator * 2)
+            case .thirtysecond: return Self.pluralNoteName(signature.denominator * 4)
+            case .quintuplet, .septuplet: return displayName
+            }
+        }
 
         // Simple meter: the beat is the denominator note (2 → half, 4 → quarter, 8 → eighth, 16 → 16th).
         let beatDenominator = signature.denominator
@@ -137,6 +148,17 @@ extension Subdivision {
             // Higher tuplets are named by their count (N per beat) — already beat-relative and true in any
             // meter; a single note value for a 5/6/7-tuplet would be ambiguous.
             return displayName
+        }
+    }
+
+    private static func pluralNoteName(_ denominator: Int) -> String {
+        switch denominator {
+        case 2: return "Halves"
+        case 4: return "Quarters"
+        case 8: return "Eighths"
+        case 16: return "Sixteenths"
+        case 32: return "32nds"
+        default: return "1/\(denominator) notes"
         }
     }
 
@@ -167,5 +189,43 @@ extension Subdivision {
         case 8:  return "⅛ beat"
         default: return "1/\(clicksPerBeat) beat"
         }
+    }
+}
+
+struct SubdivisionNotation: Equatable {
+    let denominator: Int
+    var dotted = false
+    var tupletCount: Int? = nil
+    var tupletNormalCount: Int? = nil
+
+    /// SMuFL Individual Notes: complete note heads, stems and flags.
+    var smuflNote: UInt16 {
+        switch denominator {
+        case 1: return 0xE1D2
+        case 2: return 0xE1D3
+        case 4: return 0xE1D5
+        case 8: return 0xE1D7
+        case 16: return 0xE1D9
+        case 32: return 0xE1DB
+        case 64: return 0xE1DD
+        case 128: return 0xE1DF
+        default: preconditionFailure("Unsupported written note value")
+        }
+    }
+
+    var flagCount: Int {
+        switch denominator {
+        case 8: return 1
+        case 16: return 2
+        case 32: return 3
+        case 64: return 4
+        case 128: return 5
+        default: return 0
+        }
+    }
+
+    var tupletRatio: String? {
+        guard let count = tupletCount, let normal = tupletNormalCount else { return nil }
+        return "\(count):\(normal)"
     }
 }

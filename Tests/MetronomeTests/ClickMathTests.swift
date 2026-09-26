@@ -142,7 +142,7 @@ final class ClickMathTests: XCTestCase {
         XCTAssertTrue(TimeSignature(numerator: 12, denominator: 8).isCompound)
         // Not compound: single-group 3/8, any /4 meter, and non-triple /8 numerators.
         XCTAssertFalse(TimeSignature(numerator: 3, denominator: 8).isCompound)
-        XCTAssertFalse(TimeSignature(numerator: 6, denominator: 4).isCompound)
+        XCTAssertTrue(TimeSignature(numerator: 6, denominator: 4).isCompound)
         XCTAssertFalse(TimeSignature(numerator: 4, denominator: 8).isCompound)
         XCTAssertFalse(TimeSignature(numerator: 7, denominator: 8).isCompound)
         XCTAssertEqual(TimeSignature(numerator: 12, denominator: 8).compoundGroupCount, 4)
@@ -163,7 +163,7 @@ final class ClickMathTests: XCTestCase {
         XCTAssertEqual(MetronomeConfiguration(timeSignature: .common).accents,
                        [.strong, .normal, .medium, .normal])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 4)).accents,
-                       [.strong, .normal, .normal, .medium, .normal, .normal])   // felt in two: secondary on beat 4
+                       [.strong, .medium])   // two dotted-half beats
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 3, denominator: 8)).accents,
                        [.strong, .normal, .normal])
     }

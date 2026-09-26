@@ -11,6 +11,7 @@ struct SongLibraryView: View {
 
     @State private var editingSong: Song?
     @State private var showImporter = false
+    @State private var importFailed = false
 
     var body: some View {
         NavigationStack {
@@ -59,10 +60,21 @@ struct SongLibraryView: View {
             .fileImporter(isPresented: $showImporter,
                           allowedContentTypes: [.maelzelSong, .json],
                           allowsMultipleSelection: false) { result in
-                if case let .success(urls) = result, let url = urls.first,
-                   let song = SongImport.song(from: url) {
+                guard !store.loadDidFail else { return }
+                if case let .success(urls) = result, let url = urls.first {
+                    guard let song = SongImport.song(from: url) else {
+                        importFailed = true
+                        return
+                    }
                     store.upsert(song)
+                } else if case .failure = result {
+                    importFailed = true
                 }
+            }
+            .alert("Couldn’t import song", isPresented: $importFailed) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Choose a Maelzel song file or a song JSON exported from Maelzel.")
             }
             .sheet(item: $editingSong) { song in
                 SongBuilderView(song: song, store: store, metronome: metronome)
@@ -144,7 +156,7 @@ struct SongLibraryView: View {
                 .font(.system(size: 42))
                 .foregroundStyle(Theme.textSecondary)
             Text("No songs yet")
-                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .font(.system(size: 20, weight: .bold, design: .default))
             Text("Tap + to build a tempo-map — sections whose tempo, meter, subdivision and groove change through the piece. Or tap the bookmark on the Metronome screen to save your current settings as a song.")
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.textSecondary)
@@ -175,7 +187,7 @@ private struct SongCard: View {
             Button(action: onEdit) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(song.name)
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .font(.system(size: 18, weight: .bold, design: .default))
                         .foregroundStyle(Theme.textPrimary)
                     Text(summary)
                         .font(.system(size: 13))

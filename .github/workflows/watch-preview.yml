@@ -1,0 +1,45 @@
+name: Watch companion preview
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/watch-preview.yml'
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -switch /Applications/Xcode.app
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Build and launch on Apple Watch simulator
+        run: |
+          xcodebuild build -scheme MaelzelWatch -destination 'generic/platform=watchOS Simulator' -derivedDataPath build/watch CODE_SIGNING_ALLOWED=NO > build-watch.log 2>&1
+          WATCH=$(xcrun simctl list devices available --json | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next(v["udid"] for k,vs in d.items() if "watchOS" in k for v in vs if v.get("isAvailable")))')
+          xcrun simctl boot "$WATCH"
+          xcrun simctl bootstatus "$WATCH" -b
+          xcrun simctl install "$WATCH" build/watch/Build/Products/Debug-watchsimulator/MaelzelWatch.app
+          xcrun simctl launch "$WATCH" app.metronome.mobile.watchkitapp
+          sleep 5
+          xcrun simctl io "$WATCH" screenshot watch-companion.png
+          xcrun simctl terminate "$WATCH" app.metronome.mobile.watchkitapp
+          xcrun simctl launch "$WATCH" app.metronome.mobile.watchkitapp --watch-preview-song
+          sleep 3
+          xcrun simctl io "$WATCH" screenshot watch-song.png
+          xcrun simctl terminate "$WATCH" app.metronome.mobile.watchkitapp
+          xcrun simctl launch "$WATCH" app.metronome.mobile.watchkitapp --watch-preview-song --watch-preview-sound
+          sleep 3
+          xcrun simctl io "$WATCH" screenshot watch-sound.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: watch-preview
+          path: |
+            watch-companion.png
+            watch-song.png
+            watch-sound.png
+            build-watch.log
+          retention-days: 14

@@ -86,7 +86,7 @@ struct SongSectionEditorView: View {
                     VStack(spacing: 16) {
                         Card("Section name") {
                             TextField("Section name", text: $name)
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                .font(.system(size: 18, weight: .semibold, design: .default))
                                 .textFieldStyle(.plain)
                                 .foregroundStyle(Theme.textPrimary)
                         }
@@ -99,7 +99,7 @@ struct SongSectionEditorView: View {
                         Card("Groove") { GrooveControlView(viewModel: editVM) }
 
                         // Count-in: the SAME shared control as the main screen, in this section's grid.
-                        Card("Count-in") {
+                        Card("Pickup") {
                             CountInControlView(viewModel: editVM)
                             if editVM.pickupTicks > 0 {
                                 Toggle(isOn: $startWithPickup) {
@@ -118,8 +118,7 @@ struct SongSectionEditorView: View {
                         voiceCard
 
                         Card("Length") {
-                            LengthStepper(title: "Bars", value: bars, range: SongSection.barsRange,
-                                          format: { "\($0)" }, onChange: { bars = $0 })
+                            MeasurePicker(value: $bars)
                             LengthStepper(title: "Repeat", value: repeatCount, range: SongSection.repeatRange,
                                           format: { "×\($0)" }, onChange: { repeatCount = $0 })
                             Text("This section plays \(bars) bar\(bars == 1 ? "" : "s")"
@@ -212,8 +211,72 @@ private struct InheritSegmentedRow: View {
     }
 }
 
-/// A compact −/value/+ stepper for the section's bars/repeats (section-specific fields the main screen has
-/// no equivalent of), in the app's pill style.
+/// Choose a section's measure count by scrolling or typing. Both paths feed the same autosaved value.
+private struct MeasurePicker: View {
+    @Binding var value: Int
+    @State private var entry: String
+    @FocusState private var isEditing: Bool
+
+    init(value: Binding<Int>) {
+        _value = value
+        _entry = State(initialValue: String(value.wrappedValue))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Measures")
+                    .font(.system(size: 17, weight: .semibold))
+                Spacer()
+                TextField("Count", text: $entry)
+                    .keyboardType(.numberPad)
+                    .focused($isEditing)
+                    .multilineTextAlignment(.center)
+                    .font(.system(size: 24, weight: .semibold))
+                    .monospacedDigit()
+                    .frame(width: 100, height: 48)
+                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityLabel("Number of measures")
+            }
+            Text("Scroll the wheel or type a number (1–512).")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+            Picker("Measures", selection: Binding(
+                get: { value },
+                set: { value = $0; entry = String($0); isEditing = false }
+            )) {
+                ForEach(SongSection.barsRange, id: \.self) { count in
+                    Text("\(count) \(count == 1 ? "measure" : "measures")").tag(count)
+                }
+            }
+            .pickerStyle(.wheel)
+            .frame(height: 140)
+            .clipped()
+        }
+        .onChange(of: entry) { _, text in
+            // A temporarily empty/invalid field leaves the last valid count intact.
+            if let number = Int(text) {
+                value = min(max(number, SongSection.barsRange.lowerBound), SongSection.barsRange.upperBound)
+            }
+        }
+        .onChange(of: value) { _, number in
+            if !isEditing { entry = String(number) }
+        }
+        .onChange(of: isEditing) { _, editing in
+            if !editing { entry = String(value) }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if isEditing {
+                    Spacer()
+                    Button("Done") { isEditing = false }
+                }
+            }
+        }
+    }
+}
+
+/// A compact stepper for section repeats.
 private struct LengthStepper: View {
     let title: String
     let value: Int
@@ -235,7 +298,7 @@ private struct LengthStepper: View {
             .accessibilityLabel("Fewer \(title)")
 
             Text(format(value))
-                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .font(.system(size: 17, weight: .bold, design: .default))
                 .frame(minWidth: 56)
                 .monospacedDigit()
 

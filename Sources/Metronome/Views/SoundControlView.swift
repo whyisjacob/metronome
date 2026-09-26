@@ -17,7 +17,7 @@ struct SoundControlView: View {
                             Image(systemName: sound.symbolName)
                                 .font(.system(size: 14, weight: .semibold))
                             Text(sound.displayName)
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                .font(.system(size: 14, weight: .semibold, design: .default))
                         }
                         .frame(maxWidth: .infinity, minHeight: 46)
                     }

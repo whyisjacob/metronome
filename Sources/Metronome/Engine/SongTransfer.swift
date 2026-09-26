@@ -45,11 +45,22 @@ enum SongTransfer {
     /// same `id`). Prefers the versioned wrapper; falls back to a bare `Song` JSON.
     static func decode(_ data: Data) throws -> Song {
         let dec = JSONDecoder()
-        if let export = try? dec.decode(SongExport.self, from: data) {
-            return export.song.reidentified()
+        // Song's permissive persistence decoder supplies defaults for missing keys. At the
+        // import boundary require an actual song, and never retry a broken wrapper as a bare song.
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ImportError.invalidSong
         }
+        if object.keys.contains("song") {
+            guard let song = object["song"] as? [String: Any], song["sections"] is [Any] else {
+                throw ImportError.invalidSong
+            }
+            return try dec.decode(SongExport.self, from: data).song.reidentified()
+        }
+        guard object["sections"] is [Any] else { throw ImportError.invalidSong }
         return try dec.decode(Song.self, from: data).reidentified()
     }
+
+    enum ImportError: Error { case invalidSong }
 
     /// A filesystem-safe file name (without extension) derived from the song's name.
     static func fileNameStem(for song: Song) -> String {

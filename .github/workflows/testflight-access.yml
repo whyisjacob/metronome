@@ -1,0 +1,25 @@
+name: TestFlight availability
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/testflight-access.yml'
+      - 'tools/testflight_access.py'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'PyJWT[crypto]==2.10.1'
+      - name: Inspect Apple processing and tester availability
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: python tools/testflight_access.py

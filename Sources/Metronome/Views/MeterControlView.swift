@@ -24,35 +24,40 @@ struct MeterControlView: View {
 
     var body: some View {
         Card("Time signature") {
-            Text(viewModel.timeSignature.displayString)
-                .font(.system(size: 30, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(Theme.textPrimary)
-                .frame(maxWidth: .infinity)
-                .accessibilityHidden(true)   // the wheels below carry the accessible values
-
             // Two roll-to-select wheels: beats-per-bar (1–32) beside the beat unit (2/4/8/16), split by "/".
             HStack(spacing: 4) {
                 wheel(selection: numeratorSelection,
                       values: Array(TimeSignature.numeratorRange),
-                      label: "Beats per bar",
+                      label: "Time signature numerator",
                       value: "\(viewModel.timeSignature.numerator)")
 
                 Text("/")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .font(.system(size: 30, weight: .bold, design: .default))
                     .foregroundStyle(Theme.textSecondary)
                     .accessibilityHidden(true)
 
                 wheel(selection: denominatorSelection,
                       values: TimeSignature.allowedDenominators,
-                      label: "Beat unit",
+                      label: "Time signature denominator",
                       value: "\(viewModel.timeSignature.denominator)")
             }
-            .frame(height: 150)
+            .frame(height: 110)
             .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: 16).fill(Theme.surface))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.stroke))
             .clipShape(RoundedRectangle(cornerRadius: 16))
+
+            if viewModel.timeSignature.canGroupBeats {
+                Picker("Tempo beat", selection: Binding(
+                    get: { viewModel.timeSignature.groupedBeats },
+                    set: { viewModel.setGroupedBeats($0) })) {
+                    Text(viewModel.timeSignature.denominatorNoteName).tag(false)
+                    Text(viewModel.timeSignature.groupedNoteName).tag(true)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("tempo-beat-unit")
+            }
+            Text("\(viewModel.timeSignature.beatsPerBar) beats per bar · \(viewModel.timeSignature.beatUnitName.lowercased()) beat")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
 
             // Quick accent groupings for asymmetric meters (e.g. 7/8 as 2+2+3 or 3+2+2). Each sets the
             // downbeat strong and every subsequent group head to a secondary (medium) accent. These shape
@@ -81,7 +86,7 @@ struct MeterControlView: View {
         Picker(label, selection: selection) {
             ForEach(values, id: \.self) { v in
                 Text("\(v)")
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .font(.system(size: 22, weight: .semibold, design: .default))
                     .monospacedDigit()
                     .tag(v)
             }

@@ -1,16 +1,11 @@
 import Foundation
 
-/// A musical time signature: `numerator` beats per bar, each a `denominator`-note.
-///
-/// Timing model: the metronome pulses `beatsPerBar` times per bar at the set BPM, where a *beat* is the
-/// denominator note for simple meters and a *dotted quarter* for compound meters (6/8, 9/8, 12/8). So
-/// 120 BPM is 120 quarter-notes/min in 4/4 and 120 **dotted-quarters**/min in 6/8 (the jig "in 2" feel,
-/// reachable at real jig tempos), with the eighth pulse available as a 3-per-beat subdivision.
+/// A notated meter plus the note value counted by the tempo. Compound beats contain
+/// three denominator notes; counting individual denominator notes remains an explicit choice.
 struct TimeSignature: Equatable, Hashable, Codable {
-    /// Beats per bar. Always within `numeratorRange`.
     let numerator: Int
-    /// The note value that gets one beat. Always one of `allowedDenominators`.
     let denominator: Int
+    let groupedBeats: Bool
 
     static let allowedDenominators = [2, 4, 8, 16]
     /// Beats per bar. Widened to 32 so odd/large meters (5, 7, 11, 13, …) can be dialed in; the
@@ -18,9 +13,11 @@ struct TimeSignature: Equatable, Hashable, Codable {
     /// `beat % numerator`), so nothing here is preset-bound.
     static let numeratorRange = 1...32
 
-    init(numerator: Int, denominator: Int) {
+    init(numerator: Int, denominator: Int, groupedBeats: Bool? = nil) {
         self.numerator = numerator.clamped(to: TimeSignature.numeratorRange)
         self.denominator = TimeSignature.allowedDenominators.contains(denominator) ? denominator : 4
+        let canGroup = self.numerator >= 3 && self.numerator % 3 == 0
+        self.groupedBeats = canGroup && (groupedBeats ?? (self.numerator >= 6))
     }
 
     static let common = TimeSignature(numerator: 4, denominator: 4)
@@ -29,19 +26,44 @@ struct TimeSignature: Equatable, Hashable, Codable {
 
     // MARK: - Compound meter
 
-    /// A compound meter groups its eighth-note pulses in threes: an `x/8` meter whose numerator is a
-    /// multiple of three and ≥ 6 (6/8, 9/8, 12/8, …). 3/8 stays *simple* (a single group), and any
-    /// non-`/8` meter is simple regardless of numerator (6/4 is duple-simple, not compound).
-    var isCompound: Bool { denominator == 8 && numerator >= 6 && numerator % 3 == 0 }
-
-    /// Number of dotted-quarter groups in a compound bar (2 for 6/8, 3 for 9/8, 4 for 12/8); `nil` for
-    /// simple meters. Equals `beatsPerBar` for a compound meter.
+    /// Conventional compound meters include 6/4, 9/16 and 12/2, not just x/8.
+    /// 3/x defaults to three beats but can explicitly be counted as one dotted beat.
+    var canGroupBeats: Bool { numerator >= 3 && numerator % 3 == 0 }
+    var isCompound: Bool { groupedBeats }
     var compoundGroupCount: Int? { isCompound ? numerator / 3 : nil }
-
-    /// The number of **main beats (pulses) per bar** — the length of the accent pattern and what the
-    /// engine actually pulses. Compound meters are felt in dotted-quarter groups, so `6/8` is 2 beats,
-    /// `9/8` is 3, `12/8` is 4; every simple meter is `numerator` beats.
     var beatsPerBar: Int { isCompound ? numerator / 3 : numerator }
+
+    var denominatorNoteName: String {
+        switch denominator {
+        case 2: return "Half note"
+        case 8: return "Eighth note"
+        case 16: return "Sixteenth note"
+        default: return "Quarter note"
+        }
+    }
+
+    var groupedNoteName: String {
+        switch denominator {
+        case 2: return "Dotted whole"
+        case 4: return "Dotted half"
+        case 16: return "Dotted eighth"
+        default: return "Dotted quarter"
+        }
+    }
+
+    var beatUnitName: String { isCompound ? groupedNoteName : denominatorNoteName }
+
+    enum CodingKeys: String, CodingKey { case numerator, denominator, groupedBeats }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let n = try c.decode(Int.self, forKey: .numerator)
+        let d = try c.decode(Int.self, forKey: .denominator)
+        // Existing songs/recents must retain their original audible tempo and bar length.
+        let grouped = try c.decodeIfPresent(Bool.self, forKey: .groupedBeats)
+            ?? (d == 8 && n >= 6 && n % 3 == 0)
+        self.init(numerator: n, denominator: d, groupedBeats: grouped)
+    }
 
     /// The default *grouping* of a simple meter's beats — the group sizes (summing to `beatsPerBar`) whose
     /// heads take a secondary (medium) accent. Asymmetric meters get their conventional grouping (5/8 →
@@ -49,6 +71,7 @@ struct TimeSignature: Equatable, Hashable, Codable {
     /// is a single group (downbeat only). Compound meters don't use this — each dotted-quarter beat is its
     /// own group head (see `defaultAccents`).
     var defaultGrouping: [Int] {
+        if isCompound { return [beatsPerBar] }
         switch (numerator, denominator) {
         case (4, _):  return [2, 2]        // 4/4 → beat 1 strong, beat 3 medium
         case (5, 8):  return [2, 3]        // 5/8 → accents on 1, 3

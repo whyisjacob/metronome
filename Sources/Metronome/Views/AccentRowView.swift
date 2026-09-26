@@ -15,7 +15,7 @@ struct AccentRowView: View {
                     Button(action: { viewModel.cycleAccent(index) }) {
                         VStack(spacing: 3) {
                             Text("\(index + 1)")
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .font(.system(size: 16, weight: .bold, design: .default))
                             Text(viewModel.accents[index].shortLabel)
                                 .font(.system(size: 9, weight: .semibold))
                                 .textCase(.uppercase)

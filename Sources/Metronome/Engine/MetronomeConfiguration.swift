@@ -8,6 +8,7 @@ import Foundation
 /// tested directly, independently of AVAudioEngine.
 struct MetronomeConfiguration: Equatable, Codable {
     static let tempoRange: ClosedRange<Double> = 30...300
+    static let defaultBPM: Double = 92
     /// Swing amount: `0` = straight, `1` = full triplet swing. Clamped to this range.
     static let swingRange: ClosedRange<Double> = 0...1
 
@@ -29,7 +30,7 @@ struct MetronomeConfiguration: Equatable, Codable {
     /// (the default) sounds every sixteenth. Applies only when `subdivision == .sixteenth`. See `RhythmCell`.
     var cell: RhythmCell
 
-    init(bpm: Double = 120,
+    init(bpm: Double = MetronomeConfiguration.defaultBPM,
          timeSignature: TimeSignature = .common,
          subdivision: Subdivision = .quarter,
          accents: [BeatAccent]? = nil,
@@ -56,6 +57,7 @@ struct MetronomeConfiguration: Equatable, Codable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Preserve the historical tempo for older saved data that omitted this field.
         let bpm = try c.decodeIfPresent(Double.self, forKey: .bpm) ?? 120
         let ts = try c.decodeIfPresent(TimeSignature.self, forKey: .timeSignature) ?? .common
         let sub = try c.decodeIfPresent(Subdivision.self, forKey: .subdivision) ?? .quarter
