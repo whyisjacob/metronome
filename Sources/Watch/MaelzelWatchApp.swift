@@ -17,8 +17,7 @@ struct WatchMetronomeView: View {
     @State private var showSettings = false
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 6) {
+                VStack(spacing: 4) {
                     HStack {
                         Text(model.leadIn ? "Lead-in" : model.currentConfig.timeSignature.displayString)
                             .font(.caption2).foregroundStyle(.secondary)
@@ -26,35 +25,35 @@ struct WatchMetronomeView: View {
                         Button { showSettings = true } label: { Image(systemName: "gearshape") }
                             .buttonStyle(.plain).accessibilityLabel("Settings")
                     }
+                    .frame(height: 22)
                     Text(model.count > 0 ? "\(model.count)" : "—")
-                        .font(.system(size: 48, weight: .semibold, design: .rounded))
+                        .font(.system(size: 42, weight: .semibold, design: .rounded))
                         .monospacedDigit().minimumScaleFactor(0.6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .foregroundStyle(model.count == 1 ? Color.yellow : Color.white)
                         .accessibilityLabel("Beat \(model.count)")
                     HStack(spacing: 12) {
-                        Button { model.changeTempo(model.tempoValue - 1) } label: { Image(systemName: "minus") }
+                        Button { model.changeTempo(model.tempoValue - 1) } label: { Image(systemName: "minus").frame(width: 34, height: 30) }
                             .accessibilityLabel("Slower")
-                        VStack(spacing: 0) {
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
                             Text("\(Int(model.tempoValue))").font(.title3).monospacedDigit()
-                            Text(model.tempoUnit).font(.system(size: 10))
+                            Text(model.snapshot?.song == nil ? "BPM" : "%").font(.system(size: 9))
                         }
-                        Button { model.changeTempo(model.tempoValue + 1) } label: { Image(systemName: "plus") }
+                        Button { model.changeTempo(model.tempoValue + 1) } label: { Image(systemName: "plus").frame(width: 34, height: 30) }
                             .accessibilityLabel("Faster")
                     }
-                    .buttonStyle(.plain).disabled(model.isBusy)
-                    Text(model.status).font(.system(size: 10)).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center).lineLimit(2)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
+                    .buttonStyle(.plain).disabled(model.isBusy).frame(height: 30)
+                    Text(model.status).font(.system(size: 9)).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).lineLimit(2).frame(height: 22)
                 Button { model.toggle() } label: {
                     Label(model.isPlaying ? "Stop" : (model.isBusy ? "Cancel" : "Start"),
                           systemImage: model.isPlaying || model.isBusy ? "stop.fill" : "play.fill")
-                        .font(.headline).frame(maxWidth: .infinity, minHeight: 44)
+                        .font(.headline).frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44)
+                        .background(model.isPlaying ? Color.red : Color.green, in: Capsule())
                 }
-                .buttonStyle(.borderedProminent).tint(model.isPlaying ? .red : .green)
-                .background(.black)
+                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 4)
             .sheet(isPresented: $showSettings) {
                 Form {
                     if model.snapshot?.song != nil { Text(model.title).font(.headline) }
