@@ -70,7 +70,7 @@ final class WatchMetronomeModel: ObservableObject {
     }
 
     private func receive(_ value: WatchSnapshot) {
-        guard value.revision > (snapshot?.revision ?? -1) else { return }
+        guard value.revision > max(snapshot?.revision ?? -1, deferredSnapshot?.revision ?? -1) else { return }
         if let current = snapshot, value.config == current.config, value.song == current.song,
            value.pickupTicks == current.pickupTicks {
             snapshot = value

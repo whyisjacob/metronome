@@ -19,11 +19,15 @@ struct WatchMetronomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 6) {
-                    Text(model.title).font(.caption2).lineLimit(1)
-                    Text(model.leadIn ? "Lead-in" : model.currentConfig.timeSignature.displayString)
-                        .font(.caption2).foregroundStyle(.secondary)
+                    HStack {
+                        Text(model.leadIn ? "Lead-in" : model.currentConfig.timeSignature.displayString)
+                            .font(.caption2).foregroundStyle(.secondary)
+                        Spacer()
+                        Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                            .buttonStyle(.plain).accessibilityLabel("Settings")
+                    }
                     Text(model.count > 0 ? "\(model.count)" : "—")
-                        .font(.system(size: 64, weight: .semibold, design: .rounded))
+                        .font(.system(size: 48, weight: .semibold, design: .rounded))
                         .monospacedDigit().minimumScaleFactor(0.6)
                         .foregroundStyle(model.count == 1 ? Color.yellow : Color.white)
                         .accessibilityLabel("Beat \(model.count)")
@@ -39,9 +43,7 @@ struct WatchMetronomeView: View {
                     }
                     .buttonStyle(.plain).disabled(model.isBusy)
                     Text(model.status).font(.system(size: 10)).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button { showSettings = true } label: { Label("Settings", systemImage: "gearshape") }
-                        .font(.caption2).buttonStyle(.plain)
+                        .multilineTextAlignment(.center).lineLimit(2)
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -55,6 +57,7 @@ struct WatchMetronomeView: View {
             }
             .sheet(isPresented: $showSettings) {
                 Form {
+                    if model.snapshot?.song != nil { Text(model.title).font(.headline) }
                     Picker("Beat output", selection: $model.output) {
                         ForEach(WatchOutput.allCases, id: \.self) { Text($0.title).tag($0) }
                     }.disabled(model.isPlaying)
