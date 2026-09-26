@@ -38,17 +38,20 @@ struct WatchMetronomeView: View {
                             .accessibilityLabel("Faster")
                     }
                     .buttonStyle(.plain).disabled(model.isBusy)
-                    Button { model.toggle() } label: {
-                        Label(model.isPlaying ? "Stop" : (model.isBusy ? "Cancel" : "Start"),
-                              systemImage: model.isPlaying || model.isBusy ? "stop.fill" : "play.fill")
-                            .font(.headline).frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(.borderedProminent).tint(model.isPlaying ? .red : .green)
                     Text(model.status).font(.system(size: 10)).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     Button { showSettings = true } label: { Label("Settings", systemImage: "gearshape") }
                         .font(.caption2).buttonStyle(.plain)
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button { model.toggle() } label: {
+                    Label(model.isPlaying ? "Stop" : (model.isBusy ? "Cancel" : "Start"),
+                          systemImage: model.isPlaying || model.isBusy ? "stop.fill" : "play.fill")
+                        .font(.headline).frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent).tint(model.isPlaying ? .red : .green)
+                .background(.black)
             }
             .sheet(isPresented: $showSettings) {
                 Form {

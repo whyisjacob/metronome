@@ -94,7 +94,7 @@ final class PhoneWatchBridge {
         link.request(["action": "stop", "token": token]) { [weak self] result in
             guard let self else { return }
             if case .success(let reply) = result, reply["ok"] as? Bool == true {
-                _ = self.ownership.release(token)
+                guard self.ownership.release(token) else { return }
                 UserDefaults.standard.removeObject(forKey: "phoneWatchClaim")
                 self.model?.watchOwnsPlayback = false
                 self.model?.watchStatus = "Watch connected"

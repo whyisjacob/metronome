@@ -150,6 +150,7 @@ targets:
     sources:
       - path: Sources/Watch
       - path: Sources/Shared
+      - path: Sources/Metronome/ViewModel/SongFromConfig.swift
       - path: Sources/Metronome/Engine
         excludes:
           - SongStore.swift

@@ -71,6 +71,11 @@ final class WatchMetronomeModel: ObservableObject {
 
     private func receive(_ value: WatchSnapshot) {
         guard value.revision > (snapshot?.revision ?? -1) else { return }
+        if let current = snapshot, value.config == current.config, value.song == current.song,
+           value.pickupTicks == current.pickupTicks {
+            snapshot = value
+            return
+        }
         if isPlaying {
             deferredSnapshot = value
             status = "Phone changes ready · Stop to apply"
@@ -94,7 +99,6 @@ final class WatchMetronomeModel: ObservableObject {
             // Cancelled starts can still receive replies. Release the phone claim without sounding.
             guard self.requestID == id, self.foreground else {
                 if case .success(let reply) = result, let token = reply["token"] as? String { self.link.release(token) }
-                self.isBusy = false
                 return
             }
             self.isBusy = false
@@ -192,7 +196,7 @@ final class WatchMetronomeModel: ObservableObject {
 
     func setForeground(_ active: Bool) {
         foreground = active
-        if !active, output == .vibration, isPlaying || isBusy {
+        if !active, isBusy || (output == .vibration && isPlaying) {
             stop()
             status = "Vibration paused · keep Maelzel visible"
         } else if active { tick() }
