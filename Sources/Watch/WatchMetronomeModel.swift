@@ -74,6 +74,7 @@ final class WatchMetronomeModel: ObservableObject {
         if let current = snapshot, value.config == current.config, value.song == current.song,
            value.pickupTicks == current.pickupTicks {
             snapshot = value
+            if !isPlaying { status = "Synced with iPhone" }
             return
         }
         if isPlaying {
