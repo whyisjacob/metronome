@@ -25,6 +25,22 @@ final class SongIntegrationTests: XCTestCase {
 
     // MARK: - (a) One shared view-model / engine drives the song per section
 
+    func testLeadInShowsFirstSectionBeforeAnyAudioPulse() {
+        let vm = MetronomeViewModel()
+        var song = sampleSong()
+        song.pickupTicks = 2
+        vm.playSong(song)
+        defer { vm.exitSong() }
+
+        XCTAssertEqual(vm.currentSectionIndex, 0)
+        XCTAssertEqual(vm.currentSongSection?.name, "A")
+        XCTAssertEqual(vm.nextSongSection?.name, "B")
+        XCTAssertTrue(vm.isSongLeadIn)
+
+        vm.updateSongPosition(sectionIndex: 0, bar: 1)
+        XCTAssertFalse(vm.isSongLeadIn)
+    }
+
     func testPlayingASongDrivesTheSameViewModelPerSection() {
         let vm = MetronomeViewModel()
         let baselineBPM = vm.bpm            // the single-tempo default

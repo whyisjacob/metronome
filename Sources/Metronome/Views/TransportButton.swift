@@ -3,23 +3,26 @@ import SwiftUI
 /// The large start/stop control.
 struct TransportButton: View {
     let isPlaying: Bool
+    var startTitle = "Start"
+    var stopTitle = "Stop"
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: isPlaying ? "stop.fill" : "play.fill")
-                    .font(.system(size: 18, weight: .medium))
-                Text(isPlaying ? "Stop" : "Start")
-                    .font(.system(size: 18, weight: .semibold, design: .default))
+                    .font(.system(size: 28, weight: .bold))
+                Text(isPlaying ? stopTitle : startTitle)
+                    .font(.system(size: 28, weight: .bold, design: .default))
             }
-            .foregroundStyle(isPlaying ? Theme.textPrimary : Theme.background)
-            .frame(maxWidth: .infinity, minHeight: 54)
+            .foregroundStyle(Theme.background)
+            .frame(maxWidth: .infinity, minHeight: 80)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isPlaying ? Theme.surfaceRaised : Theme.start)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isPlaying ? Theme.stop : Theme.start)
             )
         }
-        .accessibilityLabel(isPlaying ? "Stop metronome" : "Start metronome")
+        .buttonStyle(.plain)
+        .accessibilityLabel(isPlaying ? stopTitle : startTitle)
     }
 }

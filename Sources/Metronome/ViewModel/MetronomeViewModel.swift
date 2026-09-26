@@ -36,10 +36,11 @@ final class MetronomeViewModel: ObservableObject {
     /// main screen shows the song's now-playing strip and the transport/visual reflect the song; the
     /// single-tempo tempo/meter/subdivision controls are hidden (the song drives them per section).
     @Published private(set) var activeSong: Song?
-    /// Index of the section currently sounding (from the engine pulse), or `nil` before start / after end.
+    /// Current section, including the destination during its lead-in; nil outside a song or after its end.
     @Published private(set) var currentSectionIndex: Int?
-    /// 1-based bar within the current section (from the engine pulse).
+    /// 1-based bar within the current section; zero during its lead-in.
     @Published private(set) var currentSongBar = 0
+    var isSongLeadIn: Bool { currentSectionIndex != nil && currentSongBar == 0 && !songFinished }
     /// Set when the song has played to its end (the transport then offers a replay).
     @Published private(set) var songFinished = false
     /// Bumped on every `playSong` so the app shell can switch to the Metronome tab to reveal playback
@@ -224,12 +225,13 @@ final class MetronomeViewModel: ObservableObject {
     func playSong(_ song: Song) {
         guard !song.sections.isEmpty else { return }
         activeSong = song
-        currentSectionIndex = nil
-        currentSongBar = 0
+        currentSectionIndex = 0
+        currentSongBar = song.pickupTicks > 0 ? 0 : 1
         songFinished = false
         songPaused = false
         songLaunchNonce &+= 1
         // Play the master-tempo-scaled copy; the stored song's per-section BPMs are untouched.
+        lastPulseSequence = engine.currentPulse.sequence
         performPlaybackStart { try engine.startSong(song.playbackScaled()) }
     }
 
@@ -237,16 +239,22 @@ final class MetronomeViewModel: ObservableObject {
     /// stopped/finished). Songs don't resume mid-way from a full stop — a metronome count must start clean.
     private func replaySong() {
         guard let song = activeSong else { return }
-        currentSectionIndex = nil
-        currentSongBar = 0
+        currentSectionIndex = 0
+        currentSongBar = song.pickupTicks > 0 ? 0 : 1
         songFinished = false
         songPaused = false
+        lastPulseSequence = engine.currentPulse.sequence
         performPlaybackStart { try engine.startSong(song.playbackScaled()) }
     }
 
     /// Pause: stop sounding but KEEP the song's position, so Resume continues from here.
     func pauseSong() {
         guard activeSong != nil else { return }
+        // Completion may arrive between display polls and the user's Stop tap.
+        if engineSongHasFinished {
+            finishSong()
+            return
+        }
         engine.stop()          // pauses the audio engine, preserves the song cursor
         songPaused = true
         setPlaying(false)
@@ -255,34 +263,63 @@ final class MetronomeViewModel: ObservableObject {
     /// Resume from where Pause left off (no reset).
     func resumeSong() {
         guard activeSong != nil, songPaused else { return }
+        if songFinished || engineSongHasFinished {
+            replaySong()
+            return
+        }
+        lastPulseSequence = engine.currentPulse.sequence
         guard performPlaybackStart({ try engine.resumeSong() }) else { return }
         songPaused = false
         setPlaying(true)
     }
 
+    private var engineSongHasFinished: Bool {
+        let pulse = engine.currentPulse
+        return engine.isCurrentSongPulse(pulse) && pulse.songFinished
+    }
+
+    private func finishSong() {
+        songFinished = true
+        songPaused = false
+        stop()
+        currentSectionIndex = nil
+        currentSongBar = 0
+    }
+
     /// Restart the current section from its first beat.
     func restartCurrentSection() {
-        guard activeSong != nil else { return }
-        guard performPlaybackStart({ try engine.seekSong(toSection: currentSectionIndex ?? 0) }) else { return }
-        songPaused = false
-        setPlaying(true)
+        selectSongSection(currentSectionIndex ?? 0)
     }
 
     /// Skip to the next section (no-op past the last).
     func skipToNextSection() {
         guard let song = activeSong else { return }
-        let next = (currentSectionIndex ?? -1) + 1
+        let next = (currentSectionIndex ?? 0) + 1
         guard next < song.sections.count else { return }
-        guard performPlaybackStart({ try engine.seekSong(toSection: next) }) else { return }
-        songPaused = false
-        setPlaying(true)
+        selectSongSection(next)
     }
 
     /// Skip to the previous section (before the first, just restarts the current one).
     func skipToPreviousSection() {
         guard activeSong != nil else { return }
         let prev = (currentSectionIndex ?? 0) - 1
-        guard performPlaybackStart({ try engine.seekSong(toSection: max(prev, 0)) }) else { return }
+        selectSongSection(max(prev, 0))
+    }
+
+    func skipSongLeadIn() {
+        guard isSongLeadIn else { return }
+        selectSongSection(currentSectionIndex ?? 0, playPickup: false)
+    }
+
+    /// Publish the destination immediately, including during its pickup before the first song pulse.
+    func selectSongSection(_ index: Int, playPickup: Bool = true) {
+        guard let song = activeSong, song.sections.indices.contains(index) else { return }
+        lastPulseSequence = engine.currentPulse.sequence
+        guard performPlaybackStart({ try engine.seekSong(toSection: index, playPickup: playPickup) }) else { return }
+        let section = song.sections[index]
+        currentSectionIndex = index
+        currentSongBar = playPickup && section.startWithPickup && section.pickupTicks > 0 ? 0 : 1
+        songFinished = false
         songPaused = false
         setPlaying(true)
     }
@@ -348,7 +385,6 @@ final class MetronomeViewModel: ObservableObject {
             displayBeat = nil
             subdivisionPhase = 0
             isOnBeat = false
-            lastPulseSequence = 0
         }
         // Keeping the screen awake is a UI concern applied in the view (`ContentView` observes
         // `isPlaying`), so this view-model stays free of `UIApplication` and fully headless-testable.
@@ -691,6 +727,7 @@ final class MetronomeViewModel: ObservableObject {
     func pollPulse() {
         guard isPlaying else { return }
         let pulse = engine.currentPulse
+        guard activeSong == nil || engine.isCurrentSongPulse(pulse) else { return }
         guard pulse.sequence != lastPulseSequence else { return }
         lastPulseSequence = pulse.sequence
 
@@ -698,9 +735,7 @@ final class MetronomeViewModel: ObservableObject {
         // the beat, so `effectiveConfig`/`visualState` already point at the current section.
         if activeSong != nil {
             if pulse.songFinished {
-                songFinished = true
-                stop()
-                currentSectionIndex = nil
+                finishSong()
                 return
             }
             updateSongPosition(sectionIndex: pulse.sectionIndex, bar: (pulse.barInSection ?? 0) + 1)

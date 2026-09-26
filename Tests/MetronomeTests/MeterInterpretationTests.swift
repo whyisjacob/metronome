@@ -104,7 +104,7 @@ final class MeterInterpretationTests: XCTestCase {
         XCTAssertEqual(vm.pickupTicks, 1)
         vm.setGroupedBeats(false)
         XCTAssertEqual(vm.config.beatsPerBar, 6)
-        XCTAssertEqual(vm.config.bpm, 120)
+        XCTAssertEqual(vm.config.bpm, 92)
     }
 
     func testUnavailablePickupDoesNotShiftOneClickBarBeforeZero() {

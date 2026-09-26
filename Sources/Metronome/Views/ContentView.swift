@@ -63,13 +63,12 @@ struct ContentView: View {
                         // section progress + transport + exit). No separate player.
                         SongNowPlayingView(viewModel: viewModel, song: song)
                     } else {
-                        TempoControlView(viewModel: viewModel)
-
-                        // Start/Stop sits high — right under the tempo readout — so it's prominent and
-                        // within easy one-handed reach, not buried at the bottom of the scroll.
+                        // Keep playback above the tempo controls so it is immediately visible.
                         TransportButton(isPlaying: viewModel.isPlaying) {
                             viewModel.toggle()
                         }
+
+                        TempoControlView(viewModel: viewModel)
 
                         // Silent practice now lives in Settings (it's a mode set occasionally — not more
                         // important than tempo/meter). To keep a muted-but-running metronome from reading as

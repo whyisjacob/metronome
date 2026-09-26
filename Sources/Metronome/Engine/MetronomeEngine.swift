@@ -34,6 +34,7 @@ final class MetronomeEngine {
     /// Called whenever playback starts/stops, including auto-changes from interruptions/route loss,
     /// so the UI can stay the mirror of the engine's truth.
     var onPlaybackStateChanged: ((Bool) -> Void)?
+    private var playbackStateRevision: UInt64 = 0
 
     // MARK: AVFoundation
 
@@ -53,6 +54,7 @@ final class MetronomeEngine {
         /// the single-tempo `plan`. Exactly one of the two is active at a time.
         var songPlan: SongPlan?
         var running = false
+        var songGeneration: UInt64 = 0
         var resetRequested = false
         /// Song-mode seek: the flat click index to jump to on the next render block (nil = no seek). The
         /// callback re-anchors `framesElapsed`/`nextClickIndex` to it so a section restart/skip is
@@ -110,11 +112,17 @@ final class MetronomeEngine {
         var barInSection: Int?
         /// Set once when the song's final click has sounded and playback has reached the song's end.
         var songFinished: Bool = false
+        var songGeneration: UInt64 = 0
     }
     private let pulse = OSAllocatedUnfairLock(initialState: BeatPulse())
 
     /// Reads the latest beat pulse (main thread).
     var currentPulse: BeatPulse { pulse.withLock { $0 } }
+
+    /// An old render block can finish after a new start/seek request. Never treat its pulse as current.
+    func isCurrentSongPulse(_ value: BeatPulse) -> Bool {
+        control.withLock { value.songGeneration == $0.songGeneration }
+    }
 
     // MARK: Audio-thread-only state
 
@@ -395,14 +403,20 @@ final class MetronomeEngine {
         if voice.anyVoiceEnabled { ensureVoiceRendered() }   // render spoken buffers if any section counts
         let preroll = songStartPreroll(song, plan: plan, voice: voice)
         songModeActive = true
+        publishSongStart(plan: plan, preroll: preroll)
+        setRunning(true)
+    }
+
+    private func publishSongStart(plan: SongPlan, preroll: SongPreroll?) {
         control.withLock {
+            $0.songGeneration &+= 1
             $0.songPlan = plan
             $0.plan = nil
+            $0.songSeekClickIndex = nil
             $0.songPreroll = preroll
             $0.running = true
             $0.resetRequested = true
         }
-        setRunning(true)
     }
 
     /// Resumes song playback from where it was paused (via `stop()`), WITHOUT resetting position: the render
@@ -450,6 +464,7 @@ final class MetronomeEngine {
         }
         try ensureRealtimeEngineRunning()
         control.withLock {
+            $0.songGeneration &+= 1
             $0.songSeekClickIndex = resolved.target
             $0.songPreroll = preroll
             $0.running = true
@@ -477,8 +492,13 @@ final class MetronomeEngine {
 
     private func setRunning(_ running: Bool) {
         isRunning = running
+        playbackStateRevision &+= 1
+        let revision = playbackStateRevision
         let cb = onPlaybackStateChanged
-        DispatchQueue.main.async { cb?(running) }
+        DispatchQueue.main.async { [weak self] in
+            guard self?.playbackStateRevision == revision else { return }
+            cb?(running)
+        }
     }
 
     private func ensureRealtimeEngineRunning() throws {
@@ -610,27 +630,23 @@ final class MetronomeEngine {
     /// (playback begins on the lead-in, exactly as live); with no pickup, sample 0 is the downbeat as
     /// before. Renders the song's length (plus the lead-in and a short tail so the final click's body is
     /// captured); no click exists at or after the end, so the tail cannot introduce a spurious onset.
-    func renderOfflineSong(_ song: Song) throws -> [Float] {
+    func renderOfflineSong(_ song: Song, frameLimit: Int? = nil) throws -> [Float] {
         let (plan, voice) = makeSongPlan(song)
         if voice.anyVoiceEnabled { ensureVoiceRendered() }
         let preroll = songStartPreroll(song, plan: plan, voice: voice)
-        control.withLock {
-            $0.songPlan = plan
-            $0.plan = nil
-            $0.songPreroll = preroll
-            $0.running = true
-            $0.resetRequested = true
-        }
+        publishSongStart(plan: plan, preroll: preroll)
         let tail = Int((0.05 * configuredSampleRate).rounded())
         let span = preroll?.span ?? 0     // the lead-in occupies [−span, 0) → captured as the first `span` samples
-        return try drainOfflineRender(totalFrames: span + plan.totalFrames + tail)
+        return try drainOfflineRender(totalFrames: min(frameLimit ?? Int.max, span + plan.totalFrames + tail))
     }
 
     /// Renders a song offline as if the user SEEKED to `sectionIndex` from a standing start (the section's
     /// pickup lead-in, if it opts in, plays before the section's downbeat, then the song continues to its
     /// end). Sample 0 is the first pickup tick (or the section's downbeat when there is no pickup). Proves
     /// the section pickup is audible on a seek — as opposed to a continuous pass, which never replays it.
-    func renderOfflineSongSeeking(_ song: Song, toSection sectionIndex: Int) throws -> [Float] {
+    func renderOfflineSongSeeking(_ song: Song, toSection sectionIndex: Int,
+                                  playPickup: Bool = true,
+                                  interruptingPickupAtSection initialSection: Int? = nil) throws -> [Float] {
         let (plan, voice) = makeSongPlan(song)
         guard !plan.isEmpty else { return [] }
         if voice.anyVoiceEnabled { ensureVoiceRendered() }
@@ -638,17 +654,35 @@ final class MetronomeEngine {
         let target = plan.firstClickIndex(ofSection: s)
         let downbeat = target < plan.clickCount ? plan.frame(at: target) : plan.totalFrames
         let section = song.sections[s]
-        let preroll: SongPreroll? = (section.pickupTicks > 0 && section.startWithPickup)
+        let preroll: SongPreroll? = (playPickup && section.pickupTicks > 0 && section.startWithPickup)
             ? SongPreroll(section: section, pickupTicks: section.pickupTicks, downbeatFrame: downbeat,
                           sampleRate: configuredSampleRate, speakSubdivisions: voice.speakSubdivisions(section: s))
             : nil
+        if let initialSection {
+            let initial = song.sections[initialSection]
+            let initialTarget = plan.firstClickIndex(ofSection: initialSection)
+            let initialPreroll = SongPreroll(section: initial, pickupTicks: initial.pickupTicks,
+                                           downbeatFrame: plan.frame(at: initialTarget),
+                                           sampleRate: configuredSampleRate,
+                                           speakSubdivisions: voice.speakSubdivisions(section: initialSection))
+            control.withLock {
+                $0.songPlan = plan
+                $0.plan = nil
+                $0.songSeekClickIndex = initialTarget
+                $0.songPreroll = initialPreroll
+                $0.running = true
+                $0.resetRequested = true
+            }
+            // Let the callback consume the lead-in, then seek while it is still in progress.
+            _ = try drainOfflineRender(totalFrames: 512)
+        }
         control.withLock {
             $0.songPlan = plan
             $0.plan = nil
             $0.songSeekClickIndex = target
             $0.songPreroll = preroll
             $0.running = true
-            $0.resetRequested = true
+            $0.resetRequested = initialSection == nil
         }
         let tail = Int((0.05 * configuredSampleRate).rounded())
         let span = preroll?.span ?? 0
@@ -746,10 +780,12 @@ final class MetronomeEngine {
         var voiceMuted = false
         var seekClickIndex: Int?
         var preroll: SongPreroll?
+        var songGeneration: UInt64 = 0
         control.withLockUnchecked { c in
             running = c.running
             plan = c.plan
             songPlan = c.songPlan
+            songGeneration = c.songGeneration
             selectedTable = c.clickTable
             pickupTable = c.pickupTable
             classicPickupTable = c.classicPickupTable
@@ -804,6 +840,8 @@ final class MetronomeEngine {
             let target = min(max(seekClickIndex, 0), sp.clickCount)
             atState.nextClickIndex = target
             atState.framesElapsed = target < sp.clickCount ? sp.frame(at: target) : sp.totalFrames
+            atState.prerollClicks = []
+            atState.prerollNext = 0
             atState.songFinishedPublished = false
             for i in atState.voices.indices { atState.voices[i].active = false }   // drop a ringing click
         }
@@ -907,7 +945,7 @@ final class MetronomeEngine {
                                          into: ablPtr, frameCount: frames, cutVoices: false)
                         }
                     }
-                    publishSongPulse(plan: songPlan, index: idx, level: level)
+                    publishSongPulse(plan: songPlan, index: idx, level: level, generation: songGeneration)
                 }
                 idx += 1
             }
@@ -915,7 +953,7 @@ final class MetronomeEngine {
             // End of song: all clicks consumed and the playhead has reached the song's full length.
             if idx >= count, !atState.songFinishedPublished, blockEnd >= songPlan.totalFrames {
                 atState.songFinishedPublished = true
-                publishSongFinished()
+                publishSongFinished(generation: songGeneration)
             }
         } else if let plan {
             // A new plan published mid-playback (a live tempo/meter/subdivision/accent change) is
@@ -1210,11 +1248,12 @@ final class MetronomeEngine {
         }
     }
 
-    private func publishSongPulse(plan: SongPlan, index: Int, level: AccentLevel) {
+    private func publishSongPulse(plan: SongPlan, index: Int, level: AccentLevel, generation: UInt64) {
         let beat = plan.beatInBar(at: index)
         let section = plan.sectionIndex(at: index)
         let bar = plan.barInSection(at: index)
         pulse.withLockUnchecked { p in
+            p.songGeneration = generation
             p.sequence &+= 1
             p.tickIndex = index
             p.beatIndex = beat
@@ -1225,8 +1264,9 @@ final class MetronomeEngine {
         }
     }
 
-    private func publishSongFinished() {
+    private func publishSongFinished(generation: UInt64) {
         pulse.withLockUnchecked { p in
+            p.songGeneration = generation
             p.sequence &+= 1          // bump so the UI poll notices even though no new click sounded
             p.songFinished = true
         }

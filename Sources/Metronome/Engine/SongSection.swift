@@ -65,7 +65,7 @@ struct SongSection: Identifiable, Equatable, Codable {
 
     init(id: UUID = UUID(),
          name: String = "Section",
-         tempoBPM: Double = 120,
+         tempoBPM: Double = MetronomeConfiguration.defaultBPM,
          timeSignature: TimeSignature = .common,
          subdivision: Subdivision = .quarter,
          accentPattern: [BeatAccent]? = nil,
@@ -113,6 +113,7 @@ struct SongSection: Identifiable, Equatable, Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         let name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Section"
+        // Preserve the historical tempo for older saved sections that omitted this field.
         let bpm = try c.decodeIfPresent(Double.self, forKey: .tempoBPM) ?? 120
         let ts = try c.decodeIfPresent(TimeSignature.self, forKey: .timeSignature) ?? .common
         let sub = try c.decodeIfPresent(Subdivision.self, forKey: .subdivision) ?? .quarter
