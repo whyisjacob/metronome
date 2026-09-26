@@ -35,6 +35,11 @@ struct ContentView: View {
                 header.padding(.horizontal, 20).padding(.bottom, 8)
                 ScrollView {
                 VStack(spacing: 16) {
+                    if viewModel.watchAvailable {
+                        Label(viewModel.watchStatus, systemImage: "applewatch")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
                     if let error = viewModel.playbackError {
                         VStack(spacing: 8) {
                             Text(error).font(.callout)
@@ -64,7 +69,8 @@ struct ContentView: View {
                         SongNowPlayingView(viewModel: viewModel, song: song)
                     } else {
                         // Keep playback above the tempo controls so it is immediately visible.
-                        TransportButton(isPlaying: viewModel.isPlaying) {
+                        TransportButton(isPlaying: viewModel.isPlaying || viewModel.watchOwnsPlayback,
+                                        stopTitle: viewModel.watchOwnsPlayback ? "Stop watch" : "Stop") {
                             viewModel.toggle()
                         }
 

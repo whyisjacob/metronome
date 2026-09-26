@@ -13,6 +13,16 @@ final class MetronomeViewModel: ObservableObject {
     @Published private(set) var config: MetronomeConfiguration
     @Published private(set) var isPlaying = false
     @Published private(set) var playbackError: String?
+    @Published var watchStatus = "Open Maelzel on your watch to connect"
+    @Published var watchOwnsPlayback = false
+    @Published var watchAvailable = false
+    private var watchBridge: PhoneWatchBridge?
+
+    func connectWatch() {
+        if watchBridge == nil { watchBridge = PhoneWatchBridge(model: self) }
+    }
+
+    func stopWatch() { watchBridge?.stopWatch() }
 
     /// The gap-click trainer overlay (silences beats for internal-time practice). Held here, applied to
     /// the engine live; deliberately not part of `MetronomeConfiguration`, so it never affects Recents,
@@ -179,6 +189,7 @@ final class MetronomeViewModel: ObservableObject {
     /// position), or starts fresh from the top when stopped/finished; otherwise it starts/stops the
     /// single-tempo click.
     func toggle() {
+        if watchOwnsPlayback { stopWatch(); return }
         if activeSong != nil {
             if isPlaying { pauseSong() }
             else if songPaused { resumeSong() }
@@ -189,6 +200,10 @@ final class MetronomeViewModel: ObservableObject {
     }
 
     func start() {
+        if watchOwnsPlayback {
+            watchBridge?.stopWatch { [weak self] in self?.start() }
+            return
+        }
         guard performPlaybackStart({ try engine.start() }) else { return }
         recents?.remember(config)   // the config you actually played becomes/refreshes a recent
     }
@@ -223,6 +238,10 @@ final class MetronomeViewModel: ObservableObject {
     /// headlessly: the song remains loaded even if audio cannot start, with a visible error and stopped
     /// transport so the user can retry.
     func playSong(_ song: Song) {
+        if watchOwnsPlayback {
+            watchBridge?.stopWatch { [weak self] in self?.playSong(song) }
+            return
+        }
         guard !song.sections.isEmpty else { return }
         activeSong = song
         currentSectionIndex = 0
@@ -313,6 +332,10 @@ final class MetronomeViewModel: ObservableObject {
 
     /// Publish the destination immediately, including during its pickup before the first song pulse.
     func selectSongSection(_ index: Int, playPickup: Bool = true) {
+        if watchOwnsPlayback {
+            watchBridge?.stopWatch { [weak self] in self?.selectSongSection(index, playPickup: playPickup) }
+            return
+        }
         guard let song = activeSong, song.sections.indices.contains(index) else { return }
         lastPulseSequence = engine.currentPulse.sequence
         guard performPlaybackStart({ try engine.seekSong(toSection: index, playPickup: playPickup) }) else { return }

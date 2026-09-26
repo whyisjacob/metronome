@@ -60,7 +60,10 @@ struct RootView: View {
             Text("Choose a Maelzel song file or a song JSON exported from Maelzel.")
         }
         // Persist song-level edits made during playback (e.g. the master tempo scale) back to the library.
-        .onAppear { metronome.onSongEdited = { songStore.upsert($0) } }
+        .onAppear {
+            metronome.onSongEdited = { songStore.upsert($0) }
+            metronome.connectWatch()
+        }
     }
 }
 

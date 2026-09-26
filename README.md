@@ -82,4 +82,6 @@ are retained as an `accuracy-test-results` artifact. TestFlight additionally che
 iOS SDK meets the current submission minimum.
 
 See [RELEASE-READINESS.md](RELEASE-READINESS.md) for the evaluation, validation evidence and remaining
-submission steps. Photo Smart Import and Apple Watch support are excluded from this release.
+submission steps. Photo Smart Import remains excluded. The Apple Watch companion supports automatic
+paired-device sync, local vibration/spoken counting, and minimal playback controls. See
+[WATCH-COMPANION.md](WATCH-COMPANION.md) for setup, runtime limits, and device acceptance checks.

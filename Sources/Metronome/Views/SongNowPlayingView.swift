@@ -88,9 +88,9 @@ struct SongNowPlayingView: View {
 
     private var transportRow: some View {
         VStack(spacing: 14) {
-            TransportButton(isPlaying: viewModel.isPlaying,
+            TransportButton(isPlaying: viewModel.isPlaying || viewModel.watchOwnsPlayback,
                             startTitle: viewModel.songFinished ? "Replay song" : (viewModel.songPaused ? "Resume song" : "Start song"),
-                            stopTitle: "Stop song") {
+                            stopTitle: viewModel.watchOwnsPlayback ? "Stop watch" : "Stop song") {
                 viewModel.toggle()
             }
             .accessibilityHint(viewModel.isPlaying ? "Stops playback and keeps your place" : "Plays the song")
