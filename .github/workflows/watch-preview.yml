@@ -25,11 +25,21 @@ jobs:
           xcrun simctl launch "$WATCH" app.metronome.mobile.watchkitapp
           sleep 5
           xcrun simctl io "$WATCH" screenshot watch-companion.png
+          xcrun simctl terminate "$WATCH" app.metronome.mobile.watchkitapp
+          xcrun simctl launch "$WATCH" app.metronome.mobile.watchkitapp --watch-preview-song
+          sleep 3
+          xcrun simctl io "$WATCH" screenshot watch-song.png
+          xcrun simctl terminate "$WATCH" app.metronome.mobile.watchkitapp
+          xcrun simctl launch "$WATCH" app.metronome.mobile.watchkitapp --watch-preview-song --watch-preview-sound
+          sleep 3
+          xcrun simctl io "$WATCH" screenshot watch-sound.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: watch-preview
           path: |
             watch-companion.png
+            watch-song.png
+            watch-sound.png
             build-watch.log
           retention-days: 14

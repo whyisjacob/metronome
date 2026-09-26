@@ -11,7 +11,7 @@ final class WatchMetronomeModel: ObservableObject {
     @Published private(set) var bar = 0
     @Published private(set) var leadIn = false
     @Published var status = "Open Maelzel on iPhone to sync"
-    @Published var output: WatchOutput = .vibration
+    @Published private(set) var output: WatchOutput = .vibration
     private let link = WatchLink()
     private let engine = MetronomeEngine()
     private var token: String?
@@ -25,6 +25,15 @@ final class WatchMetronomeModel: ObservableObject {
     private var foreground = true
 
     init() {
+        #if DEBUG
+        // Simulator-only fixtures exercise the real layout without pretending a phone is paired.
+        if ProcessInfo.processInfo.arguments.contains("--watch-preview-song") {
+            snapshot = WatchSnapshot(revision: 1, config: MetronomeConfiguration(),
+                song: Song(name: "Evening Practice", sections: [SongSection(name: "Verse", bars: 8)]), pickupTicks: 0)
+            status = "Synced with iPhone"
+            return
+        }
+        #endif
         output = WatchOutput(rawValue: UserDefaults.standard.string(forKey: "watchOutput") ?? "") ?? .vibration
         if let data = UserDefaults.standard.data(forKey: "watchSnapshot") {
             snapshot = try? WatchSnapshot.decode(data)
@@ -47,7 +56,7 @@ final class WatchMetronomeModel: ObservableObject {
             reply(["ok": true])
         }
         engine.onPlaybackStateChanged = { [weak self] playing in
-            if !playing, self?.isPlaying == true, self?.output == .voice { self?.stop() }
+            if !playing, self?.isPlaying == true, self?.output.sound != nil { self?.stop() }
         }
         link.activate()
     }
@@ -62,6 +71,15 @@ final class WatchMetronomeModel: ObservableObject {
     var tempoRange: ClosedRange<Double> { snapshot?.song == nil ? 30...300 : 50...200 }
     var tempoUnit: String { snapshot?.song == nil ? "BPM" : "% song tempo" }
     var title: String { snapshot?.song?.name ?? "Maelzel" }
+    var startTitle: String { snapshot?.startTitle ?? "Start" }
+
+    func selectOutput(_ value: WatchOutput) {
+        guard value != output else { return }
+        if isPlaying || isBusy { stop() }
+        output = value
+        UserDefaults.standard.set(value.rawValue, forKey: "watchOutput")
+        status = "\(value.title) selected · \(startTitle) when ready"
+    }
 
     func refresh() {
         link.request(["action": "fetch"]) { [weak self] result in
@@ -122,23 +140,19 @@ final class WatchMetronomeModel: ObservableObject {
         leadIn = snapshot.song.map { $0.pickupTicks > 0 } ?? (snapshot.pickupTicks > 0)
         UserDefaults.standard.set(output.rawValue, forKey: "watchOutput")
         do {
-            if output == .voice {
+            if let sound = output.sound {
                 engine.setSpeakSubdivisions(true)
                 // Fast or unmapped subdivision syllables fall back to clicks, just like iPhone.
                 engine.setClickMuted(false)
                 engine.setVoiceMuted(false)
                 lastPulse = engine.currentPulse.sequence
-                if var song = snapshot.song?.playbackScaled() {
-                    song.voiceEnabled = true
-                    for i in song.sections.indices {
-                        song.sections[i].voiceEnabled = true
-                        song.sections[i].speakSubdivisions = true
-                    }
-                    try engine.startSong(song)
+                var config = snapshot.config
+                config.sound = sound
+                engine.update(config)
+                if let song = snapshot.song {
+                    engine.setSongSound(sound)
+                    try engine.startSong(output.playbackSong(song))
                 } else {
-                    var config = snapshot.config
-                    config.sound = .voice
-                    engine.update(config)
                     engine.setPickup(Pickup(ticks: snapshot.pickupTicks))
                     try engine.start()
                 }
@@ -146,7 +160,7 @@ final class WatchMetronomeModel: ObservableObject {
             clock = WatchBeatClock(snapshot: snapshot)
             startTime = ProcessInfo.processInfo.systemUptime
             isPlaying = true
-            status = output == .vibration ? "Vibration · keep Maelzel visible" : "Spoken count on watch"
+            status = output == .vibration ? "Vibration · keep Maelzel visible" : "\(output.title) on watch"
             timer?.invalidate()
             let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.tick() }
@@ -162,7 +176,7 @@ final class WatchMetronomeModel: ObservableObject {
 
     private func tick() {
         guard isPlaying else { return }
-        if output == .voice {
+        if output.sound != nil {
             let pulse = engine.currentPulse
             guard snapshot?.song == nil || engine.isCurrentSongPulse(pulse) else { return }
             guard pulse.sequence != lastPulse else { return }

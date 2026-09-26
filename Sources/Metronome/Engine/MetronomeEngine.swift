@@ -278,6 +278,18 @@ final class MetronomeEngine {
     /// never blocks — voice buffers render on a background queue and publish when ready (until then Voice
     /// mode falls back to clicks). Needs a known sample rate, so it runs from `start()` (after the
     /// session is up) and from `update(_:)` while playing.
+    private var songClickSound: MetronomeSound = .classic
+
+    /// Song clicks default to classic on iPhone. The watch can explicitly select another timbre.
+    /// Retained across engine rebuilds and interruptions, independently of per-section Voice settings.
+    func setSongSound(_ sound: MetronomeSound) {
+        songClickSound = sound.isVoice ? .classic : sound
+        guard configuredSampleRate > 0 else { return }
+        let clicks = ClickSoundFactory.makeClickTable(sampleRate: configuredSampleRate, sound: songClickSound)
+        let pickups = ClickSoundFactory.makePickupTable(sampleRate: configuredSampleRate, sound: songClickSound)
+        control.withLock { $0.classicTable = clicks; $0.classicPickupTable = pickups }
+    }
+
     private func applySound(_ sound: MetronomeSound) {
         guard configuredSampleRate > 0 else {
             control.withLock { $0.voiceMode = sound.isVoice }
@@ -399,6 +411,7 @@ final class MetronomeEngine {
         guard !isManualRendering else { return }
         currentSong = song
         try ensureRealtimeEngineRunning()
+        setSongSound(songClickSound)
         let (plan, voice) = makeSongPlan(song)
         if voice.anyVoiceEnabled { ensureVoiceRendered() }   // render spoken buffers if any section counts
         let preroll = songStartPreroll(song, plan: plan, voice: voice)
