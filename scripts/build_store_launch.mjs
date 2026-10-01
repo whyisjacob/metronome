@@ -9,7 +9,7 @@ const files=walk(rawDir);
 const font=n=>fs.readFileSync(new URL('./fonts/'+n,import.meta.url)).toString('base64');
 const panels=[
  ['01','Find your<br>pocket.','Your beat. Your pace. Your metronome.','#ffca38','#181525','PRACTICE STARTS HERE','01'],
- ['03','Count it.<br>Play it.','Spoken counts that make rhythm click.','#bdb0ff','#211341','COUNT ALONG. PLAY STRONG.','02'],
+ ['06-Sounds','Count it.<br>Play it.','Spoken counts that make rhythm click.','#bdb0ff','#211341','COUNT ALONG. PLAY STRONG.','02'],
  ['04','One song.<br>Every change.','Map the tempo. Shape each section.','#8aead1','#062d2c','BUILD YOUR TEMPO MAP','03'],
  ['02','Odd time?<br>Good time.','Explore meters, accents & subdivisions.','#ff967d','#341619','MAKE THE TRICKY PART CLICK','04'],
  ['07','Trust your<br>inner clock.','Drop the beat. Keep your groove.','#a9d7ff','#0e2544','MEET YOUR GAP TRAINER','05'],
@@ -19,7 +19,7 @@ const browser=await puppeteer.launch({headless:true});
 const page=await browser.newPage();
 await page.setViewport({width:+W,height:+H,deviceScaleFactor:1});
 for(const [prefix,title,sub,bg,ink,label,num]of panels){
- const raw=files.find(f=>path.basename(f).startsWith(prefix+'-')&&f.endsWith('.png'));
+ const raw=files.find(f=>path.basename(f).startsWith(prefix)&&f.endsWith('.png'));
  if(!raw){console.log('SKIP '+prefix);continue;}
  const img=fs.readFileSync(raw).toString('base64');
  const html=`<!doctype html><style>
@@ -44,5 +44,6 @@ await page.setViewport({width:1320,height:Math.ceil(finished.length/3)*956,devic
 await page.setContent('<style>body{margin:0;display:grid;grid-template-columns:repeat(3,440px);background:#fff}img{width:440px;height:956px;object-fit:contain}</style>'+finished.map(f=>'<img src="data:image/png;base64,'+fs.readFileSync(path.join(outDir,f)).toString('base64')+'">').join(''));
 await page.screenshot({path:path.join(outDir,'contact-sheet.jpg'),type:'jpeg',quality:92});
 await browser.close();
+
 
 
