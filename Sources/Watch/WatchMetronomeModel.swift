@@ -11,16 +11,13 @@ final class WatchMetronomeModel: ObservableObject {
     @Published private(set) var bar = 0
     @Published private(set) var leadIn = false
     @Published var status = "Open Maelzel on iPhone to sync"
-    @Published private(set) var output: WatchOutput = .vibration
     private let link = WatchLink()
-    private let engine = MetronomeEngine()
     private var token: String?
     private var requestID = UUID()
     private var timer: Timer?
     private var clock: WatchBeatClock?
     private var startTime = 0.0
     private var lastSerial = -1
-    private var lastPulse: UInt64 = 0
     private var deferredSnapshot: WatchSnapshot?
     private var foreground = true
 
@@ -34,7 +31,8 @@ final class WatchMetronomeModel: ObservableObject {
             return
         }
         #endif
-        output = WatchOutput(rawValue: UserDefaults.standard.string(forKey: "watchOutput") ?? "") ?? .vibration
+        // Discard older audio selections: the watch now always uses haptics.
+        UserDefaults.standard.removeObject(forKey: "watchOutput")
         if let data = UserDefaults.standard.data(forKey: "watchSnapshot") {
             snapshot = try? WatchSnapshot.decode(data)
         }
@@ -55,9 +53,6 @@ final class WatchMetronomeModel: ObservableObject {
             if request["token"] as? String == self.token { self.stop() }
             reply(["ok": true])
         }
-        engine.onPlaybackStateChanged = { [weak self] playing in
-            if !playing, self?.isPlaying == true, self?.output.sound != nil { self?.stop() }
-        }
         link.activate()
     }
 
@@ -72,14 +67,6 @@ final class WatchMetronomeModel: ObservableObject {
     var tempoUnit: String { snapshot?.song == nil ? "BPM" : "% song tempo" }
     var title: String { snapshot?.song?.name ?? "Maelzel" }
     var startTitle: String { snapshot?.startTitle ?? "Start" }
-
-    func selectOutput(_ value: WatchOutput) {
-        guard value != output else { return }
-        if isPlaying || isBusy { stop() }
-        output = value
-        UserDefaults.standard.set(value.rawValue, forKey: "watchOutput")
-        status = "\(value.title) selected · \(startTitle) when ready"
-    }
 
     func refresh() {
         link.request(["action": "fetch"]) { [weak self] result in
@@ -138,63 +125,28 @@ final class WatchMetronomeModel: ObservableObject {
         guard let snapshot else { return }
         count = 0; bar = 0; sectionIndex = 0; lastSerial = -1
         leadIn = snapshot.song.map { $0.pickupTicks > 0 } ?? (snapshot.pickupTicks > 0)
-        UserDefaults.standard.set(output.rawValue, forKey: "watchOutput")
-        do {
-            if let sound = output.sound {
-                engine.setSpeakSubdivisions(true)
-                // Fast or unmapped subdivision syllables fall back to clicks, just like iPhone.
-                engine.setClickMuted(false)
-                engine.setVoiceMuted(false)
-                lastPulse = engine.currentPulse.sequence
-                var config = snapshot.config
-                config.sound = sound
-                engine.update(config)
-                if let song = snapshot.song {
-                    engine.setSongSound(sound)
-                    try engine.startSong(output.playbackSong(song))
-                } else {
-                    engine.setPickup(Pickup(ticks: snapshot.pickupTicks))
-                    try engine.start()
-                }
-            }
-            clock = WatchBeatClock(snapshot: snapshot)
-            startTime = ProcessInfo.processInfo.systemUptime
-            isPlaying = true
-            status = output == .vibration ? "Vibration · keep Maelzel visible" : "\(output.title) on watch"
-            timer?.invalidate()
-            let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.tick() }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            self.timer = timer
-            tick()
-        } catch {
-            stop()
-            status = "Audio couldn’t start. Check the watch audio output."
+        clock = WatchBeatClock(snapshot: snapshot)
+        startTime = ProcessInfo.processInfo.systemUptime
+        isPlaying = true
+        status = "Vibration · keep Maelzel awake"
+        timer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+        tick()
     }
 
     private func tick() {
         guard isPlaying else { return }
-        if output.sound != nil {
-            let pulse = engine.currentPulse
-            guard snapshot?.song == nil || engine.isCurrentSongPulse(pulse) else { return }
-            guard pulse.sequence != lastPulse else { return }
-            lastPulse = pulse.sequence
-            if pulse.songFinished { stop(); status = "Finished · Start to replay"; return }
-            if let beat = pulse.beatIndex { count = beat + 1 }
-            sectionIndex = pulse.sectionIndex ?? 0
-            bar = (pulse.barInSection ?? 0) + 1
-            leadIn = false
-        } else {
-            let elapsed = ProcessInfo.processInfo.systemUptime - startTime
-            if let end = clock?.duration, elapsed >= end { stop(); status = "Finished · Start to replay"; return }
-            guard let beat = clock?.beat(at: elapsed), beat.serial != lastSerial else { return }
-            lastSerial = beat.serial
-            count = beat.number; bar = beat.bar; sectionIndex = beat.section ?? 0; leadIn = beat.leadIn
-            // Suppress a late haptic rather than firing a burst after a delayed main-thread tick.
-            if elapsed - beat.time < 0.10, foreground, !beat.muted { WKInterfaceDevice.current().play(.click) }
-        }
+        let elapsed = ProcessInfo.processInfo.systemUptime - startTime
+        if let end = clock?.duration, elapsed >= end { stop(); status = "Finished · Start to replay"; return }
+        guard let beat = clock?.beat(at: elapsed), beat.serial != lastSerial else { return }
+        lastSerial = beat.serial
+        count = beat.number; bar = beat.bar; sectionIndex = beat.section ?? 0; leadIn = beat.leadIn
+        // Skip late ticks instead of replaying a burst. No audio session or speaker output is used.
+        if elapsed - beat.time < 0.10, foreground, !beat.muted { WKInterfaceDevice.current().play(.click) }
     }
 
     func stop() {
@@ -202,7 +154,6 @@ final class WatchMetronomeModel: ObservableObject {
         isBusy = false
         isPlaying = false
         timer?.invalidate(); timer = nil
-        engine.stop()
         if let token { link.release(token) }
         token = nil
         UserDefaults.standard.removeObject(forKey: "watchClaim")
@@ -212,7 +163,7 @@ final class WatchMetronomeModel: ObservableObject {
 
     func setForeground(_ active: Bool) {
         foreground = active
-        if !active, isBusy || (output == .vibration && isPlaying) {
+        if !active, isBusy || isPlaying {
             stop()
             status = "Vibration paused · keep Maelzel visible"
         } else if active { tick() }

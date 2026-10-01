@@ -15,7 +15,6 @@ struct MaelzelWatchApp: App {
 struct WatchMetronomeView: View {
     @ObservedObject var model: WatchMetronomeModel
     @State private var showSettings = false
-    @State private var showSound = false
     var body: some View {
         NavigationStack {
                 VStack(spacing: 4) {
@@ -36,7 +35,7 @@ struct WatchMetronomeView: View {
                             .accessibilityLabel("Selected song: \(model.title)")
                     }
                     Text(model.count > 0 ? "\(model.count)" : "—")
-                        .font(.system(size: 38, weight: .semibold, design: .rounded))
+                        .font(.system(size: 42, weight: .semibold, design: .rounded))
                         .monospacedDigit().minimumScaleFactor(0.6)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .foregroundStyle(model.count == 1 ? Color.yellow : Color.white)
@@ -52,20 +51,8 @@ struct WatchMetronomeView: View {
                             .accessibilityLabel("Faster")
                     }
                     .buttonStyle(.plain).disabled(model.isBusy).frame(height: 30)
-                    Button { showSound = true } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: model.output.symbol)
-                            Text("Sound: \(model.output.title)")
-                            Image(systemName: "chevron.right").font(.system(size: 9))
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .frame(maxWidth: .infinity, minHeight: 28)
-                        .background(.white.opacity(0.12), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Sound options, \(model.output.title)")
                     Text(model.status).font(.system(size: 9)).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center).lineLimit(1).frame(height: 12)
+                        .multilineTextAlignment(.center).lineLimit(2).frame(height: 22)
                 Button { model.toggle() } label: {
                     Label(model.isPlaying ? "Stop" : (model.isBusy ? "Cancel" : model.startTitle),
                           systemImage: model.isPlaying || model.isBusy ? "stop.fill" : "play.fill")
@@ -77,11 +64,8 @@ struct WatchMetronomeView: View {
             .padding(.horizontal, 4)
             .onAppear {
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--watch-preview-sound") { showSound = true }
+                if ProcessInfo.processInfo.arguments.contains("--watch-preview-settings") { showSettings = true }
                 #endif
-            }
-            .sheet(isPresented: $showSound) {
-                WatchSoundView(model: model)
             }
             .sheet(isPresented: $showSettings) {
                 Form {
@@ -89,10 +73,9 @@ struct WatchMetronomeView: View {
                     Text(model.status).font(.footnote)
                     Text("Subdivision: \(model.currentConfig.subdivision.displayName(in: model.currentConfig.timeSignature))")
                         .font(.footnote)
-                    Picker("Sound", selection: Binding(get: { model.output }, set: { model.selectOutput($0) })) {
-                        ForEach(WatchOutput.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }
-                    Text("Vibration requires the watch to stay awake. watchOS controls when the display sleeps; Always On alone does not keep vibration running. Audio modes can continue when the display sleeps.")
+                    Text("Vibration only. No sound plays from the watch.")
+                        .font(.footnote)
+                    Text("For longer wake time: watch Settings → Display & Brightness → Wake Duration → Wake for 70 Seconds. This extends wake time; it does not keep the watch awake indefinitely.")
                         .font(.footnote)
                     if model.snapshot?.song == nil {
                         Picker("Beats", selection: Binding(get: { model.currentConfig.timeSignature.numerator },
@@ -107,35 +90,6 @@ struct WatchMetronomeView: View {
                     Button("Sync from iPhone") { model.refresh() }
                 }
             }
-        }
-    }
-}
-
-struct WatchSoundView: View {
-    @ObservedObject var model: WatchMetronomeModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(WatchOutput.allCases, id: \.self) { output in
-                    Button {
-                        model.selectOutput(output)
-                        dismiss()
-                    } label: {
-                        HStack {
-                            Text(output.title)
-                            Spacer()
-                            if model.output == output { Image(systemName: "checkmark").foregroundStyle(.green) }
-                        }
-                        .frame(minHeight: 30)
-                    }
-                    .accessibilityLabel(output.title + (model.output == output ? ", selected" : ""))
-                }
-                Text("Changing sound stops playback. Tap \(model.startTitle) to play with your selection.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-            .navigationTitle("Sound")
         }
     }
 }

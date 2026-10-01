@@ -81,31 +81,6 @@ final class WatchCompanionTests: XCTestCase {
         XCTAssertNotEqual(Array(classic.prefix(2_400)), Array(woodblock.prefix(2_400)))
     }
 
-    func testWatchSoundChoicesMapToAllEngineSoundsAndPreserveSavedModes() {
-        XCTAssertNil(WatchOutput.vibration.sound)
-        XCTAssertEqual(WatchOutput(rawValue: "vibration"), .vibration)
-        XCTAssertEqual(WatchOutput(rawValue: "voice"), .voice)
-        XCTAssertEqual(Set(WatchOutput.allCases.compactMap(\.sound)), Set(MetronomeSound.allCases))
-    }
-
-    func testWatchSoundChoiceOverridesSongVoiceWithoutChangingItsGrid() {
-        let original = Song(name: "Practice", sections: [
-            SongSection(name: "Verse", tempoBPM: 100, subdivision: .eighth, bars: 1,
-                        voiceEnabled: true, speakSubdivisions: false)
-        ], tempoScale: 1.2, pickupTicks: 1, voiceEnabled: true)
-        for output in WatchOutput.allCases {
-            let song = output.playbackSong(original)
-            XCTAssertEqual(song.sections[0].tempoBPM, 120)
-            XCTAssertEqual(song.sections[0].subdivision, .eighth)
-            XCTAssertEqual(song.pickupTicks, 1)
-            XCTAssertEqual(song.voiceEnabled, output == .voice)
-            XCTAssertEqual(song.sections[0].voiceEnabled, output == .voice)
-            XCTAssertEqual(song.sections[0].speakSubdivisions, output == .voice)
-        }
-        XCTAssertEqual(original.sections[0].tempoBPM, 100)
-        XCTAssertEqual(original.sections[0].speakSubdivisions, false)
-    }
-
     func testSyncedManualSubdivisionsProduceEveryTick() throws {
         for subdivision in Subdivision.allCases {
             for meter in [TimeSignature.common, TimeSignature(numerator: 6, denominator: 8)] {
