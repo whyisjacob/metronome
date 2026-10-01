@@ -9,7 +9,7 @@ const files=walk(rawDir);
 const font=n=>fs.readFileSync(new URL('./fonts/'+n,import.meta.url)).toString('base64');
 const panels=[
  ['01','Find your<br>pocket.','Your beat. Your pace. Your metronome.','#ffca38','#181525','PRACTICE STARTS HERE','01'],
- ['03','Count it.<br>Play it.','Spoken counts that make rhythm click.','#bdb0ff','#211341','HEAR EVERY SUBDIVISION','02'],
+ ['03','Count it.<br>Play it.','Spoken counts that make rhythm click.','#bdb0ff','#211341','COUNT ALONG. PLAY STRONG.','02'],
  ['04','One song.<br>Every change.','Map the tempo. Shape each section.','#8aead1','#062d2c','BUILD YOUR TEMPO MAP','03'],
  ['02','Odd time?<br>Good time.','Explore meters, accents & subdivisions.','#ff967d','#341619','MAKE THE TRICKY PART CLICK','04'],
  ['07','Trust your<br>inner clock.','Drop the beat. Keep your groove.','#a9d7ff','#0e2544','MEET YOUR GAP TRAINER','05'],
@@ -39,4 +39,10 @@ for(const [prefix,title,sub,bg,ink,label,num]of panels){
  </style><div class=canvas><div class=brand>MAELZEL</div><div class=index>${num} / 06</div><h1>${title}</h1><div class=sub>${sub}</div><div class=beats><i></i><i></i><i></i><i></i></div><div class=star>✳</div><div class=ring></div><div class=phone><img src="data:image/png;base64,${img}"></div><footer><span>${label}</span><span>MAKE TIME FOR MUSIC ↗</span></footer></div>`;
  await page.setContent(html);await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:path.join(outDir,num+'-Maelzel.png')});console.log(num+' rendered from '+raw);
 }
+const finished=fs.readdirSync(outDir).filter(f=>/^\d\d-Maelzel\.png$/.test(f)).sort();
+await page.setViewport({width:1320,height:Math.ceil(finished.length/3)*956,deviceScaleFactor:1});
+await page.setContent('<style>body{margin:0;display:grid;grid-template-columns:repeat(3,440px);background:#fff}img{width:440px;height:956px;object-fit:contain}</style>'+finished.map(f=>'<img src="data:image/png;base64,'+fs.readFileSync(path.join(outDir,f)).toString('base64')+'">').join(''));
+await page.screenshot({path:path.join(outDir,'contact-sheet.jpg'),type:'jpeg',quality:92});
 await browser.close();
+
+
