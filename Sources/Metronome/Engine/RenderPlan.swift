@@ -48,7 +48,7 @@ final class RenderPlan {
         // Anchor the pickup so its first tick is at frame 0. `startTick` is the bar-relative tick playback
         // begins on; its swung frame becomes the origin. `SwingGrid.frame` is the SAME proven math the
         // grid uses, so pickup ticks inherit exact placement and swing with no separate timing path.
-        if pickup.isEnabled {
+        if pickup.effectiveTicks(ticksPerBar: config.ticksPerBar) > 0 {
             let tpBar = config.ticksPerBeat * config.beatsPerBar
             let start = pickup.startTick(ticksPerBar: tpBar)
             self.pickupFrameBase = SwingGrid.frame(forTick: start, ticksPerBeat: config.ticksPerBeat,

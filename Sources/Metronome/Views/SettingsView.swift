@@ -77,7 +77,7 @@ struct SettingsView: View {
                     .frame(width: 30)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Build a section sequence")
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 17, weight: .bold, design: .default))
                         .foregroundStyle(Theme.textPrimary)
                     Text("Chain measures with their own tempo, meter & accents — saved to your Songs.")
                         .font(.system(size: 13))
@@ -210,7 +210,7 @@ struct SettingsView: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Text("\(Int((viewModel.voiceVolume * 100).rounded()))%")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.system(size: 14, weight: .semibold, design: .default))
                     .monospacedDigit()
                     .foregroundStyle(Theme.textSecondary)
             }
@@ -251,7 +251,7 @@ struct SettingsView: View {
                             .font(.system(size: 20, weight: .semibold))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(style.displayName)
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .font(.system(size: 16, weight: .bold, design: .default))
                             Text(style.caption)
                                 .font(.system(size: 11))
                                 .foregroundStyle(settings.indicatorStyle == style
@@ -264,6 +264,9 @@ struct SettingsView: View {
                     .padding(.horizontal, 10)
                 }
                 .buttonStyle(SelectableStyle(isOn: settings.indicatorStyle == style))
+                .accessibilityIdentifier("visual-style-\(style.rawValue)")
+                .accessibilityLabel(style.displayName)
+                .accessibilityAddTraits(settings.indicatorStyle == style ? .isSelected : [])
             }
         }
     }

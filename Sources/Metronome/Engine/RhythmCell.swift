@@ -48,7 +48,7 @@ enum RhythmCell: String, CaseIterable, Identifiable, Codable {
     var displayName: String {
         switch self {
         case .straight:              return "Off"
-        case .dottedEighthSixteenth: return "Dotted 8th + 16th"
+        case .dottedEighthSixteenth: return "Long–short (3:1)"
         case .gallop:                return "Gallop"
         case .reverseGallop:         return "Reverse gallop"
         }
@@ -57,10 +57,10 @@ enum RhythmCell: String, CaseIterable, Identifiable, Codable {
     /// A compact rhythm sketch of the sounding positions, for the picker caption.
     var caption: String {
         switch self {
-        case .straight:              return "All four sixteenths"
-        case .dottedEighthSixteenth: return "♩. ♬  (long–short)"
-        case .gallop:                return "♪ ♬  (da-da-dat)"
-        case .reverseGallop:         return "♬ ♪  (dat-da-da)"
+        case .straight:              return "All four divisions"
+        case .dottedEighthSixteenth: return "¾ beat, ¼ beat"
+        case .gallop:                return "½ beat, ¼ beat, ¼ beat"
+        case .reverseGallop:         return "¼ beat, ¼ beat, ½ beat"
         }
     }
 }

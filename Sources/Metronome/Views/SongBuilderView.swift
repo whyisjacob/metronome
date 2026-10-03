@@ -81,7 +81,7 @@ struct SongBuilderView: View {
     private var nameCard: some View {
         Card("Song name") {
             TextField("Song name", text: $song.name)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .font(.system(size: 18, weight: .semibold, design: .default))
                 .textFieldStyle(.plain)
                 .foregroundStyle(Theme.textPrimary)
         }
@@ -174,7 +174,7 @@ struct SongBuilderView: View {
     private var playButton: some View {
         Button(action: play) {
             Label("Play song", systemImage: "play.fill")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .font(.system(size: 17, weight: .bold, design: .default))
                 .frame(maxWidth: .infinity, minHeight: 54)
         }
         .buttonStyle(SelectableStyle(isOn: !song.sections.isEmpty))
@@ -249,7 +249,7 @@ private struct SectionRow: View {
             Button(action: onEdit) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(section.name)
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .default))
                         .foregroundStyle(Theme.textPrimary)
                     Text("\(section.tempoSummary) · \(section.meterAndFeel)")
                         .font(.system(size: 12))
@@ -262,7 +262,7 @@ private struct SectionRow: View {
 
             // Bar count pulled out and bumped up a skosh so it's easy to find at a glance (P2.5).
             Text(section.barsSummary)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .font(.system(size: 15, weight: .bold, design: .default))
                 .monospacedDigit()
                 .foregroundStyle(Theme.textPrimary)
                 .fixedSize()

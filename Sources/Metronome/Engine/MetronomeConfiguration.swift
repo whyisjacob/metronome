@@ -7,12 +7,15 @@ import Foundation
 /// All click-timing math lives here (`frame(forTick:)`, `accentLevel(forTick:)`) so it can be unit
 /// tested directly, independently of AVAudioEngine.
 struct MetronomeConfiguration: Equatable, Codable {
-    static let tempoRange: ClosedRange<Double> = 30...300
+    /// Floor is 20 so slow half-note and dotted-half pulses (e.g. 4/2 at ♩=40 → 𝅗𝅥=20) stay reachable.
+    static let tempoRange: ClosedRange<Double> = 20...300
+    static let defaultBPM: Double = 92
     /// Swing amount: `0` = straight, `1` = full triplet swing. Clamped to this range.
     static let swingRange: ClosedRange<Double> = 0...1
 
-    /// Beats (pulses) per minute — quarter notes in a simple meter, **dotted quarters** in a compound
-    /// one. Clamped to `tempoRange`.
+    /// Beats (pulses) per minute of the meter's counted note (`timeSignature.beatValue`) — the denominator
+    /// note in a simple meter (half in 4/2, quarter in 4/4, eighth in 7/8), the **dotted** note in a grouped
+    /// one (dotted quarter in 6/8). This matches how scores write metronome marks. Clamped to `tempoRange`.
     var bpm: Double
     var timeSignature: TimeSignature
     var subdivision: Subdivision
@@ -29,7 +32,7 @@ struct MetronomeConfiguration: Equatable, Codable {
     /// (the default) sounds every sixteenth. Applies only when `subdivision == .sixteenth`. See `RhythmCell`.
     var cell: RhythmCell
 
-    init(bpm: Double = 120,
+    init(bpm: Double = MetronomeConfiguration.defaultBPM,
          timeSignature: TimeSignature = .common,
          subdivision: Subdivision = .quarter,
          accents: [BeatAccent]? = nil,
@@ -56,6 +59,7 @@ struct MetronomeConfiguration: Equatable, Codable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Preserve the historical tempo for older saved data that omitted this field.
         let bpm = try c.decodeIfPresent(Double.self, forKey: .bpm) ?? 120
         let ts = try c.decodeIfPresent(TimeSignature.self, forKey: .timeSignature) ?? .common
         let sub = try c.decodeIfPresent(Subdivision.self, forKey: .subdivision) ?? .quarter

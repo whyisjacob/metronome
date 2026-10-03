@@ -1,0 +1,34 @@
+name: Store launch screenshots
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/store-launch-screenshots.yml']
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -switch /Applications/Xcode.app
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Select installed simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; c=[v for k,vs in d.items() if "iOS" in k for v in vs if v.get("isAvailable") and "iPhone" in v["name"]]; print(next((v["udid"] for v in c if "Pro Max" in v["name"]),c[0]["udid"]))')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Capture real app screens
+        timeout-minutes: 14
+        run: |
+          xcodebuild test -scheme MetronomeUITests -destination "id=${{ steps.sim.outputs.udid }}" -parallel-testing-enabled NO -only-testing:MetronomeUITests/MetronomeUITests/testCaptureKeyScreens -resultBundlePath StoreScreens.xcresult CODE_SIGNING_ALLOWED=NO
+      - name: Export captures
+        if: always()
+        run: xcrun xcresulttool export attachments --path StoreScreens.xcresult --output-path store-captures
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: store-launch-captures
+          path: store-captures/
+          retention-days: 30

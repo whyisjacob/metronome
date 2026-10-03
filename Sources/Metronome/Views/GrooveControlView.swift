@@ -57,7 +57,7 @@ struct GrooveControlView: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Text(swingReadout)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(.system(size: 15, weight: .bold, design: .default))
                     .monospacedDigit()
                     .foregroundStyle(swingReadoutColor)
             }
@@ -67,7 +67,7 @@ struct GrooveControlView: View {
                    in: 0...1)
                 .tint(Theme.start)
 
-            Text("Gives the off-beats a shuffle feel, leaning them toward the triplet position — the main beats never move. Swing lives on the eighth/sixteenth grid, so turning it up sets an eighth-note feel automatically.")
+            Text("Delays the second click of each pair. The range runs from equal spacing (1:1) to triplet swing (2:1). Works with two or four clicks per beat; grouped dotted beats stay straight.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -97,7 +97,7 @@ struct GrooveControlView: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer(minLength: 0)
                 if viewModel.cell != .straight {
-                    Text(viewModel.cellIsActive ? "On the sixteenth grid" : "Inactive here")
+                    Text(viewModel.cellIsActive ? "Four divisions per beat" : "Inactive here")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(viewModel.cellIsActive ? Theme.accentNormal : Theme.textSecondary)
                 }
@@ -108,7 +108,7 @@ struct GrooveControlView: View {
                     Button { viewModel.setCell(cell) } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(cell.displayName)
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .font(.system(size: 15, weight: .bold, design: .default))
                             Text(cell.caption)
                                 .font(.system(size: 11))
                                 .foregroundStyle(viewModel.cell == cell
@@ -123,7 +123,7 @@ struct GrooveControlView: View {
                 }
             }
 
-            Text("Idiomatic figures on the sixteenth grid — only the pattern's notes sound, the downbeat accented. Picking one switches to the sixteenth grid automatically; “Off” restores the plain pulse.")
+            Text("Patterns divide each beat into four equal parts. The lengths shown apply with straight timing; swing changes them. Patterns are inactive on grouped dotted beats.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

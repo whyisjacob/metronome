@@ -13,6 +13,7 @@ struct RootView: View {
 
     /// 0 = Metronome, 1 = Songs. A binding so playing a song can reveal the Metronome tab automatically.
     @State private var selectedTab = 0
+    @State private var importFailed = false
 
     init() {
         // One shared RecentsStore + SoundSettingsStore, and ONE shared MetronomeViewModel that drives both
@@ -45,13 +46,24 @@ struct RootView: View {
         // Open-in: a `.maelzelsong` opened from Files or AirDrop is imported into the library, and we jump
         // to the Songs tab so the user sees it land.
         .onOpenURL { url in
+            selectedTab = 1
+            guard !songStore.loadDidFail else { return }
             if let song = SongImport.song(from: url) {
                 songStore.upsert(song)
-                selectedTab = 1
+            } else {
+                importFailed = true
             }
         }
+        .alert("Couldn’t import song", isPresented: $importFailed) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Choose a Maelzel song file or a song JSON exported from Maelzel.")
+        }
         // Persist song-level edits made during playback (e.g. the master tempo scale) back to the library.
-        .onAppear { metronome.onSongEdited = { songStore.upsert($0) } }
+        .onAppear {
+            metronome.onSongEdited = { songStore.upsert($0) }
+            metronome.connectWatch()
+        }
     }
 }
 

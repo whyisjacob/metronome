@@ -45,7 +45,7 @@ final class SmartImportViewModelTests: XCTestCase {
 
         XCTAssertEqual(vm.stage, .review)
         XCTAssertFalse(vm.foundSomething)              // review UI shows the "enter it yourself" note
-        XCTAssertEqual(vm.tempoBPM, 120)               // unchanged defaults, ready for manual entry
+        XCTAssertEqual(vm.tempoBPM, 92)                // unchanged defaults, ready for manual entry
         XCTAssertEqual(vm.numerator, 4)
         XCTAssertEqual(vm.denominator, 4)
     }

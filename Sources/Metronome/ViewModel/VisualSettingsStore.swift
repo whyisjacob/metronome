@@ -97,7 +97,7 @@ final class VisualSettingsStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.indicatorStyle = defaults.string(forKey: Keys.style)
-            .flatMap(BeatIndicatorStyle.init(rawValue:)) ?? .ball
+            .flatMap(BeatIndicatorStyle.init(rawValue:)) ?? .dots
         // Border flash is opt-in: an absent key reads as `false`.
         self.borderFlashEnabled = defaults.bool(forKey: Keys.flashOn)
         self.accentFlashColor = defaults.string(forKey: Keys.accentColor)

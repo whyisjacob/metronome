@@ -6,26 +6,10 @@ import Foundation
 /// section boundaries, so the onsets cannot come from one formula — they are expanded once here into
 /// flat, parallel arrays the render callback walks by index (`frame(at:)`, `accent(at:)`, …).
 ///
-/// ## Zero cumulative drift across section boundaries — the whole point
-/// Onsets are laid down with a running **integer** frame cursor:
-///
-///   * Within a section, click `i` (its local tick index) is placed at the **closed form**
-///     `cursor + Int((Double(i) × sectionFramesPerTick).rounded())`. Because it is `i × fpt` (never a
-///     running sum of per-tick durations), the error versus continuous time is ≤ ½ sample for *every*
-///     `i` and never accumulates — identical in spirit to `RenderPlan.frame(forTick:)`.
-///   * At a boundary the cursor advances by the section's **total integer sample length**, rounding
-///     the section duration to whole samples exactly **once**:
-///     `cursor += Int((Double(totalTicks) × sectionFramesPerTick).rounded())`.
-///
-/// So every section starts on an integer sample boundary computable independently as the sum of the
-/// earlier sections' rounded lengths; the next section's first click (`i == 0`) lands exactly on that
-/// cursor. There is no compounding fractional error, and the tempo/meter/subdivision switch takes
-/// effect precisely on that first click.
-///
-/// The per-section framesPerTick is grouped as `secondsPerTick × sampleRate` and then multiplied by
-/// `Double(i)` before rounding — the same grouping `RenderPlan`/`MetronomeConfiguration` use — so the
-/// float arithmetic is bit-for-bit what the single-tempo path (and the offline accuracy oracle)
-/// produce for the same tempo/subdivision.
+/// Section origins retain fractional samples. Each onset is rounded only after adding its local
+/// continuous position to that origin. Compensated summation carries section durations forward,
+/// avoiding the up-to-half-sample error per section caused by summing rounded section lengths.
+/// The hardware grid necessarily quantizes each final onset to the nearest sample.
 final class SongPlan {
 
     let sampleRate: Double
@@ -55,7 +39,7 @@ final class SongPlan {
     let sectionStartFrames: [Int]
     /// Number of clicks contributed by each section (index-aligned to `song.sections`).
     let sectionClickCounts: [Int]
-    /// Whole length of the song in samples — the sum of every section's rounded integer length.
+    /// Whole song duration, rounded once to the nearest sample.
     let totalFrames: Int
 
     init(song: Song, sampleRate: Double, voice: SongVoicePlan? = nil) {
@@ -83,9 +67,10 @@ final class SongPlan {
         beatIndices.reserveCapacity(estimate)
         if voice != nil { voiceTokens.reserveCapacity(estimate); speaksTokens.reserveCapacity(estimate) }
 
-        var cursor = 0
+        var cursor = 0.0
+        var compensation = 0.0
         for (s, section) in song.sections.enumerated() {
-            starts.append(cursor)
+            starts.append(Int(cursor.rounded()))
 
             let fpt = section.framesPerTick(sampleRate: sampleRate)   // secondsPerTick × sampleRate
             let tpb = section.ticksPerBeat
@@ -104,12 +89,12 @@ final class SongPlan {
                 ? RenderPlan(config: section.configuration, sampleRate: sampleRate) : nil
             let sectionSpeaksSubs = voice?.speakSubdivisions(section: s) ?? false
             for i in 0..<totalTicks {
-                // Closed form from the integer cursor: no per-tick accumulation → no intra-section drift.
+                // Closed form from the fractional section origin; quantize only the final absolute onset.
                 // Swing rides the SAME `SwingGrid` the single-tempo path uses; at `swing == 0` it is
-                // exactly `round(i × fpt)`, so a straight section is byte-for-byte unchanged. On-beats never
+                // a straight local position `i × fpt`. On-beats never
                 // move, so section length (the cursor advance below) is unaffected by swing.
-                frames.append(cursor + SwingGrid.frame(forTick: i, ticksPerBeat: tpb,
-                                                       framesPerTick: fpt, swing: swing))
+                frames.append(Int((cursor + SwingGrid.position(forTick: i, ticksPerBeat: tpb,
+                                                              framesPerTick: fpt, swing: swing)).rounded()))
 
                 let tickWithinBar = i % ticksPerBar
                 let beat = tickWithinBar / tpb                         // beat this tick belongs to
@@ -145,11 +130,15 @@ final class SongPlan {
             }
 
             counts.append(totalTicks)
-            // Advance by the section's total length, rounded to whole samples exactly ONCE.
-            cursor += Int((Double(totalTicks) * fpt).rounded())
+            // Carry fractional samples between sections. Compensated addition limits floating-point
+            // summation error; rounding each section separately would introduce cumulative drift.
+            let duration = Double(totalTicks) * fpt - compensation
+            let next = cursor + duration
+            compensation = (next - cursor) - duration
+            cursor = next
         }
 
-        starts.append(cursor)      // sentinel = end of song, so sectionStartFrames[s+1] is valid
+        starts.append(Int(cursor.rounded())) // sentinel = end of song
         self.frames = frames
         self.accents = accents
         self.sectionIndices = sectionIndices
@@ -159,7 +148,7 @@ final class SongPlan {
         self.speaksTokens = speaksTokens
         self.sectionStartFrames = starts
         self.sectionClickCounts = counts
-        self.totalFrames = cursor
+        self.totalFrames = Int(cursor.rounded())
     }
 
     // MARK: - Read API (audio thread reads these by index; all O(1), allocation-free)

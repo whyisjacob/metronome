@@ -78,7 +78,7 @@ private struct BeatDotsRow: View {
     var body: some View {
         let indices = Array(0..<max(state.beatsPerMeasure, 1))
         Group {
-            if state.beatsPerMeasure <= 12 {
+            if state.beatsPerMeasure <= 8 {
                 HStack(spacing: 10) { ForEach(indices, id: \.self) { dot($0) } }
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 18), spacing: 8)], spacing: 8) {
@@ -134,27 +134,29 @@ private struct SubdivisionPips: View {
 private struct BallIndicator: View {
     let state: BeatVisualState
     @State private var popped = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The Ball keeps its v1 behaviour: the dots/number blink on beats only (dark between beats).
-    private var activeBeat: Int? { state.isOnBeat ? state.currentBeat : nil }
+    private var activeBeat: Int? { state.isPlaying ? state.currentBeat : nil }
 
     var body: some View {
         VStack(spacing: 22) {
             ZStack {
                 Circle()
                     .fill(discColor)
-                    .frame(width: 156, height: 156)
-                    .scaleEffect(popped ? 1.06 : 0.9)
-                    .shadow(color: discColor.opacity(0.65), radius: popped ? 28 : 8)
+                    .frame(width: 128, height: 128)
+                    .scaleEffect(!reduceMotion && popped ? 1.025 : 1.0)
                 Text(centerLabel)
-                    .font(.system(size: 34, weight: .heavy, design: .rounded))
+                    .font(.system(size: 34, weight: .semibold, design: .default))
                     .monospacedDigit()
                     .foregroundStyle(Theme.background)
             }
             .animation(.easeOut(duration: 0.12), value: popped)
-            .onChange(of: state.flashID) { _, _ in
+            .task(id: state.flashID) {
+                guard state.isPlaying, !reduceMotion else { popped = false; return }
                 popped = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) { popped = false }
+                do { try await Task.sleep(for: .milliseconds(90)) } catch { return }
+                popped = false
             }
 
             BeatDotsRow(state: state, activeBeat: activeBeat)
@@ -204,23 +206,24 @@ private struct DotsIndicator: View {
 private struct CounterIndicator: View {
     let state: BeatVisualState
     @State private var popped = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 12) {
             Text(bigLabel)
-                .font(.system(size: 120, weight: .heavy, design: .rounded))
+                .font(.system(size: 120, weight: .regular, design: .default))
                 .monospacedDigit()
                 .foregroundStyle(numberColor)
-                .scaleEffect(popped ? 1.06 : 1.0)
-                .shadow(color: numberColor.opacity(state.isPlaying ? 0.5 : 0), radius: popped ? 22 : 6)
+                .scaleEffect(!reduceMotion && popped ? 1.02 : 1.0)
                 .animation(.easeOut(duration: 0.11), value: popped)
-                .onChange(of: state.flashID) { _, _ in
-                    popped = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) { popped = false }
-                }
+                .task(id: state.flashID) {
+                guard state.isPlaying, !reduceMotion else { popped = false; return }
+                popped = true
+                do { try await Task.sleep(for: .milliseconds(90)) } catch { return }
+                popped = false
+            }
             Text(subLabel)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .tracking(1.5)
+                .font(.system(size: 15, weight: .bold, design: .default))
                 .foregroundStyle(Theme.textSecondary)
             if state.ticksPerBeat > 1 {
                 SubdivisionPips(state: state)
@@ -234,8 +237,8 @@ private struct CounterIndicator: View {
     }
 
     private var subLabel: String {
-        guard state.isPlaying, let b = state.currentBeat else { return "READY" }
-        return "BEAT \(b + 1) OF \(max(state.beatsPerMeasure, 1))"
+        guard state.isPlaying, let b = state.currentBeat else { return "Ready" }
+        return "Beat \(b + 1) of \(max(state.beatsPerMeasure, 1))"
     }
 
     private var numberColor: Color {
@@ -252,6 +255,7 @@ private struct CounterIndicator: View {
 private struct RingIndicator: View {
     let state: BeatVisualState
     @State private var popped = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let size: CGFloat = 220
 
@@ -268,10 +272,10 @@ private struct RingIndicator: View {
 
             VStack(spacing: 2) {
                 Text(centerLabel)
-                    .font(.system(size: 56, weight: .heavy, design: .rounded))
+                    .font(.system(size: 56, weight: .semibold, design: .default))
                     .monospacedDigit()
                     .foregroundStyle(centerColor)
-                    .scaleEffect(popped ? 1.08 : 1.0)
+                    .scaleEffect(!reduceMotion && popped ? 1.02 : 1.0)
                     .animation(.easeOut(duration: 0.11), value: popped)
                 Text("of \(max(state.beatsPerMeasure, 1))")
                     .font(.system(size: 14, weight: .semibold))
@@ -279,10 +283,12 @@ private struct RingIndicator: View {
             }
         }
         .frame(width: size, height: size)
-        .onChange(of: state.flashID) { _, _ in
-            popped = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) { popped = false }
-        }
+        .task(id: state.flashID) {
+                guard state.isPlaying, !reduceMotion else { popped = false; return }
+                popped = true
+                do { try await Task.sleep(for: .milliseconds(90)) } catch { return }
+                popped = false
+            }
     }
 
     /// Global subdivision positions that are NOT on a beat (the beat positions are drawn by `beatTick`).

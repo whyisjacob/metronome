@@ -1,22 +1,8 @@
 import XCTest
 @testable import Metronome
 
-/// Pure, deterministic proof that `SongPlan` expands a multi-section tempo-map onto the correct
-/// sample grid — and, critically, with **zero cumulative drift across section boundaries**.
-///
-/// Like `OfflineRenderAccuracyTests`, the oracle here is built **independently from first principles**
-/// and never consults `SongPlan`'s output:
-///
-///   * `secondsPerBeat = 60 / BPM`, split into `ticksPerBeat` equal clicks, where `ticksPerBeat` is
-///     the subdivision's *musical* meaning written out per case (quarter 1, eighth 2, triplet 3,
-///     sixteenth 4) — NOT read from `Subdivision.ticksPerBeat`.
-///   * A running **integer** frame cursor: section `s` begins at the sum of the earlier sections'
-///     rounded integer lengths; click `i` within it is `cursor + round(i × secondsPerTick × sr)`; the
-///     cursor then advances by `round(totalTicks × secondsPerTick × sr)` (rounded once).
-///
-/// This is the definition the task specifies. If `SongPlan` accumulated per-tick durations, forgot to
-/// round a boundary once, or switched tempo/meter/subdivision on the wrong tick, its frames would
-/// diverge from this oracle and the tests fail. The math is never bent to match `SongPlan`.
+/// Independent musical oracle: sum continuous section durations, add each local tick time,
+/// then quantize the absolute onset once. Never derive expectations from SongPlan.
 final class SongPlanTests: XCTestCase {
 
     private let sampleRate = 44_100.0
@@ -48,6 +34,7 @@ final class SongPlanTests: XCTestCase {
 
     fileprivate struct Oracle {
         let clicks: [ExpectedClick]
+        let sectionOrigins: [Double]
         let sectionStarts: [Int]        // count == specs.count + 1 (last entry == totalFrames)
         let sectionClickCounts: [Int]
         let framesPerTick: [Double]     // per-section continuous frames/tick
@@ -60,12 +47,14 @@ final class SongPlanTests: XCTestCase {
     fileprivate func buildOracle(_ specs: [Spec], sampleRate: Double) -> Oracle {
         var clicks: [ExpectedClick] = []
         var starts: [Int] = []
+        var origins: [Double] = []
         var counts: [Int] = []
         var fpts: [Double] = []
         var firsts: [Int] = []
-        var cursor = 0
+        var cursor = 0.0
         for (s, spec) in specs.enumerated() {
-            starts.append(cursor)
+            starts.append(Int(cursor.rounded()))
+            origins.append(cursor)
             firsts.append(clicks.count)
 
             let secondsPerBeat = 60.0 / spec.bpm
@@ -78,7 +67,7 @@ final class SongPlanTests: XCTestCase {
             counts.append(totalTicks)
 
             for i in 0..<totalTicks {
-                let frame = cursor + Int((Double(i) * fpt).rounded())
+                let frame = Int((cursor + Double(i) * fpt).rounded())
                 let tickWithinBar = i % ticksPerBar
                 let bar = i / ticksPerBar
                 let beatInBar: Int? = (tickWithinBar % spec.ticksPerBeat == 0)
@@ -93,11 +82,11 @@ final class SongPlanTests: XCTestCase {
                 clicks.append(ExpectedClick(frame: frame, section: s, localTick: i,
                                             bar: bar, beatInBar: beatInBar, accent: accent))
             }
-            // Advance the integer cursor by the section's total length, rounded to samples ONCE.
-            cursor += Int((Double(totalTicks) * fpt).rounded())
+            // Carry the continuous duration; round only absolute onsets.
+            cursor += Double(totalTicks) * fpt
         }
-        starts.append(cursor)
-        return Oracle(clicks: clicks, sectionStarts: starts, sectionClickCounts: counts,
+        starts.append(Int(cursor.rounded()))
+        return Oracle(clicks: clicks, sectionOrigins: origins, sectionStarts: starts, sectionClickCounts: counts,
                       framesPerTick: fpts, firstClickIndex: firsts)
     }
 
@@ -141,7 +130,7 @@ final class SongPlanTests: XCTestCase {
         XCTAssertEqual(plan.clickCount, oracle.clicks.count,
             "total click count must equal the independently expanded grid")
         XCTAssertEqual(plan.totalFrames, oracle.totalFrames,
-            "total song length must equal the sum of independently rounded section lengths")
+            "total song length must equal the rounded sum of continuous section durations")
         XCTAssertEqual(plan.sectionClickCounts, oracle.sectionClickCounts)
         XCTAssertEqual(plan.sectionStartFrames, oracle.sectionStarts,
             "each section must start on the independently computed integer cursor")
@@ -177,7 +166,7 @@ final class SongPlanTests: XCTestCase {
 
         for k in 0..<plan.clickCount {
             let e = oracle.clicks[k]
-            let idealContinuous = Double(oracle.sectionStarts[e.section])
+            let idealContinuous = oracle.sectionOrigins[e.section]
                 + Double(e.localTick) * oracle.framesPerTick[e.section]
             XCTAssertLessThanOrEqual(abs(Double(plan.frame(at: k)) - idealContinuous), 0.5,
                 "click \(k) (section \(e.section), localTick \(e.localTick)) drifted off the closed form")

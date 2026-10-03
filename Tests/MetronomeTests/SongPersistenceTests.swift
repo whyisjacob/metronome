@@ -8,7 +8,7 @@ final class SongPersistenceTests: XCTestCase {
     // MARK: - Validation / clamping
 
     func testTempoClampedToSupportedRange() {
-        XCTAssertEqual(SongSection(tempoBPM: 5).tempoBPM, 30)
+        XCTAssertEqual(SongSection(tempoBPM: 5).tempoBPM, 20)
         XCTAssertEqual(SongSection(tempoBPM: 9000).tempoBPM, 300)
         XCTAssertEqual(SongSection(tempoBPM: 137).tempoBPM, 137)
     }

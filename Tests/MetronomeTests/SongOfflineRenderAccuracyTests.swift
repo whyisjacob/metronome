@@ -2,25 +2,18 @@ import XCTest
 import AVFoundation
 @testable import Metronome
 
-/// The song-mode headless accuracy proof — the multi-tempo analogue of `OfflineRenderAccuracyTests`,
-/// and just as deliberately **independent**.
-///
-/// It renders a whole multi-section song through `MetronomeEngine`'s real `AVAudioSourceNode` callback
-/// under AVAudioEngine offline manual rendering (the same code that runs live), detects click onsets in
-/// the produced PCM, and confronts them with a grid built **from first principles**, never from
-/// `SongPlan`:
-///
-///   * A running **integer** frame cursor. Section `s` begins at `Σ_{j<s} round(totalTicks_j × fpt_j)`,
-///     where `fpt_j = (60 / BPM_j) / ticksPerBeat_j × sampleRate` and `ticksPerBeat` is the subdivision's
-///     musical meaning hard-coded per case (quarter 1, eighth 2, triplet 3, sixteenth 4).
-///   * Click `i` of section `s` is due at `cursor_s + round(i × fpt_s)`.
-///
-/// Because the oracle is derived from the musical definition and the integer-cursor rule the task
-/// specifies — not from the code under test — a defect in `SongPlan`/engine (an accumulating cursor, a
-/// boundary rounded the wrong way, a tempo/meter/subdivision switched one tick early) makes the *audio*
-/// disagree with this grid and fails the test. Assertion (C) is tight enough that a boundary misplaced
-/// by even one sample fails. The oracle is never relaxed to match a broken engine.
+/// Independent musical oracle: sum continuous section durations, add each local tick time,
+/// then quantize the absolute onset once. Never derive expectations from SongPlan.
 final class SongOfflineRenderAccuracyTests: XCTestCase {
+
+    func testFractionalBoundariesInRenderedAudio() throws {
+        let specs = (0..<80).map { index in
+            Spec(name: "Section \(index)", bpm: index % 2 == 0 ? 137 : 149,
+                 numerator: 4, denominator: 4, subdivision: .quarter, ticksPerBeat: 1,
+                 bars: 1, repeatCount: 1, accents: [true, false, false, false])
+        }
+        try renderAndAssert(specs, label: "80 fractional section boundaries")
+    }
 
     private let sampleRate = 44_100.0
 
@@ -47,6 +40,7 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
 
     private struct Oracle {
         let clicks: [ExpectedClick]
+        let sectionOrigins: [Double]
         let sectionStarts: [Int]
         let sectionClickCounts: [Int]
         let firstClickIndex: [Int]
@@ -57,12 +51,14 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
     private func buildOracle(_ specs: [Spec], sampleRate: Double) -> Oracle {
         var clicks: [ExpectedClick] = []
         var starts: [Int] = []
+        var origins: [Double] = []
         var counts: [Int] = []
         var firsts: [Int] = []
         var fpts: [Double] = []
-        var cursor = 0
+        var cursor = 0.0
         for (s, spec) in specs.enumerated() {
-            starts.append(cursor)
+            starts.append(Int(cursor.rounded()))
+            origins.append(cursor)
             firsts.append(clicks.count)
 
             let secondsPerBeat = 60.0 / spec.bpm
@@ -75,7 +71,7 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
             counts.append(totalTicks)
 
             for i in 0..<totalTicks {
-                let frame = cursor + Int((Double(i) * fpt).rounded())
+                let frame = Int((cursor + Double(i) * fpt).rounded())
                 let tickWithinBar = i % ticksPerBar
                 let accent: AccentLevel
                 if tickWithinBar % spec.ticksPerBeat == 0 {
@@ -86,10 +82,10 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
                 }
                 clicks.append(ExpectedClick(frame: frame, section: s, localTick: i, accent: accent))
             }
-            cursor += Int((Double(totalTicks) * fpt).rounded())   // round section length ONCE
+            cursor += Double(totalTicks) * fpt   // round section length ONCE
         }
-        starts.append(cursor)
-        return Oracle(clicks: clicks, sectionStarts: starts, sectionClickCounts: counts,
+        starts.append(Int(cursor.rounded()))
+        return Oracle(clicks: clicks, sectionOrigins: origins, sectionStarts: starts, sectionClickCounts: counts,
                       firstClickIndex: firsts, framesPerTick: fpts)
     }
 
@@ -98,7 +94,7 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
             SongSection(name: spec.name,
                         tempoBPM: spec.bpm,
                         timeSignature: TimeSignature(numerator: spec.numerator,
-                                                     denominator: spec.denominator),
+                                                     denominator: spec.denominator, groupedBeats: false),
                         subdivision: spec.subdivision,
                         // Oracle uses boolean accents; map to the engine's `BeatAccent` for the real song.
                         accentPattern: spec.accents.map { $0 ? BeatAccent.strong : .normal },
@@ -127,7 +123,7 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
     /// A second, harder map: a subdivision change into fast sixteenths and a section with repeats, plus
     /// three distinct tempos. Fastest interval is the sixteenth at 132 BPM ≈ 114 ms — still safe.
     ///
-    /// All three sections are SIMPLE meters (5/8 is odd but not compound; 6/4 is duple-simple), so the
+    /// All three sections explicitly count denominator notes (including six quarters in 6/4), so the
     /// subdivision's musical ticks-per-beat is the grid — compound meters have their own dedicated
     /// dotted-quarter accuracy tests in `OfflineRenderAccuracyTests`.
     func testSubdivisionAndRepeatSongMatchesIndependentGrid() throws {
@@ -185,7 +181,7 @@ final class SongOfflineRenderAccuracyTests: XCTestCase {
             //     for EVERY click — the last section as tight as the first. At a section's first click
             //     (localTick 0) the ideal IS the integer boundary cursor, so a boundary misplaced by ≥1
             //     sample makes this reach ≥1 and FAILS.
-            let idealContinuous = Double(oracle.sectionStarts[e.section])
+            let idealContinuous = oracle.sectionOrigins[e.section]
                 + Double(e.localTick) * oracle.framesPerTick[e.section]
             XCTAssertLessThan(abs(measured - idealContinuous), 1.0,
                 "onset \(k) drifted for \(label): measured \(measured), ideal \(idealContinuous)")

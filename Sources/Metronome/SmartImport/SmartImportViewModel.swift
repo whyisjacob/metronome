@@ -27,7 +27,7 @@ final class SmartImportViewModel: ObservableObject {
     @Published var stage: Stage = .chooser
 
     // Editable review fields — seeded from the detection, then freely overridable by the user.
-    @Published var tempoBPM: Int = 120
+    @Published var tempoBPM: Int = Int(MetronomeConfiguration.defaultBPM)
     @Published var numerator: Int = 4
     @Published var denominator: Int = 4
 

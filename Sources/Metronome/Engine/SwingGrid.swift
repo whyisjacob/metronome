@@ -34,15 +34,21 @@ enum SwingGrid {
     /// clamped-elsewhere to `[0, 1]`.
     @inline(__always)
     static func frame(forTick n: Int, ticksPerBeat tpb: Int, framesPerTick: Double, swing: Double) -> Int {
+        Int(position(forTick: n, ticksPerBeat: tpb, framesPerTick: framesPerTick, swing: swing).rounded())
+    }
+
+    /// Continuous sample position. Song sections add their fractional origin BEFORE rounding.
+    @inline(__always)
+    static func position(forTick n: Int, ticksPerBeat tpb: Int, framesPerTick: Double, swing: Double) -> Double {
         // Fast path: no swing (or a non-swinging division) → the original closed form, unchanged.
         guard swing > 0, swings(ticksPerBeat: tpb) else {
-            return Int((Double(n) * framesPerTick).rounded())
+            return Double(n) * framesPerTick
         }
         let pos = n % tpb
         // On-beat pair members (even position within the beat) never move — the main beats and, for
         // sixteenths, the "and" pulse stay exactly on the straight grid.
         guard pos % 2 == 1 else {
-            return Int((Double(n) * framesPerTick).rounded())
+            return Double(n) * framesPerTick
         }
         // Off-beat member: place it as a fraction of the beat, from a whole-beat base — closed form.
         let framesPerBeat = framesPerTick * Double(tpb)
@@ -50,6 +56,6 @@ enum SwingGrid {
         let pairStart = Double(pos - 1) / Double(tpb)          // fraction of the beat where the pair begins
         let pairLength = 2.0 / Double(tpb)                     // fraction of the beat one pair spans
         let offFraction = pairStart + (0.5 + swing / 6.0) * pairLength
-        return Int(((Double(beat) + offFraction) * framesPerBeat).rounded())
+        return (Double(beat) + offFraction) * framesPerBeat
     }
 }

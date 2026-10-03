@@ -14,19 +14,21 @@ struct CollapsibleSection<Content: View>: View {
     @Binding var isExpanded: Bool
     @ViewBuilder var content: () -> Content
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.22)) { isExpanded.toggle() }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: systemImage)
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.accentNormal)
+                        .foregroundStyle(Theme.textSecondary)
                         .frame(width: 26)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title)
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .font(.system(size: 17, weight: .medium, design: .default))
                             .foregroundStyle(Theme.textPrimary)
                         if let subtitle, !subtitle.isEmpty, !isExpanded {
                             Text(subtitle)
@@ -61,7 +63,7 @@ struct CollapsibleSection<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Theme.surface))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Theme.stroke))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.surface))
+
     }
 }

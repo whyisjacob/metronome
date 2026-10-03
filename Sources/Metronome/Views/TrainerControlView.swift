@@ -149,7 +149,7 @@ private struct TrainerStepperRow: View {
             .accessibilityLabel("Decrease \(title)")
 
             Text("\(value)\(suffix)")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .font(.system(size: 17, weight: .bold, design: .default))
                 .frame(minWidth: 56)
                 .monospacedDigit()
 
