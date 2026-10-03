@@ -16,7 +16,8 @@ final class IndependentTimingMathTests: XCTestCase {
             for bpm in [30, 59, 60, 97, 137, 299, 300] {
                 for top in 1...32 {
                     for bottom in [2, 4, 8, 16] {
-                        let compound = top >= 6 && top % 3 == 0
+                        // Only x/8 and x/16 group into dotted beats by default (6/4, 9/2 count the denominator).
+                        let compound = top >= 6 && top % 3 == 0 && bottom >= 8
                         for (division, simpleTicks, compoundTicks) in divisions {
                             let ticks = compound ? compoundTicks : simpleTicks
                             let config = MetronomeConfiguration(bpm: Double(bpm),
