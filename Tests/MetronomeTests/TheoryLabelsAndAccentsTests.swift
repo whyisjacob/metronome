@@ -91,7 +91,6 @@ final class TheoryLabelsAndAccentsTests: XCTestCase {
         XCTAssertEqual(accents(2, 2), [.strong, .normal])
         // 12/8 — compound 4/4: secondary on the THIRD dotted-quarter beat, NOT a flat run of mediums.
         XCTAssertEqual(accents(12, 8), [.strong, .normal, .medium, .normal])
-        // 6/4 — two dotted-half beats.
         // 6/4 counts six quarters (3+3); two dotted halves only when the user groups it.
         XCTAssertEqual(accents(6, 4), [.strong, .normal, .normal, .medium, .normal, .normal])
         XCTAssertEqual(TimeSignature(numerator: 6, denominator: 4, groupedBeats: true).defaultAccents,
