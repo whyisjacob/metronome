@@ -73,7 +73,7 @@ final class IndependentTimingMathTests: XCTestCase {
 
     func testSongDurationMatchesClampedAndRoundedPlaybackTempo() {
         let slow = Song(sections: [SongSection(tempoBPM: 30)], tempoScale: 0.5)
-        XCTAssertEqual(slow.durationSeconds, 8, accuracy: 1e-10)
+        XCTAssertEqual(slow.durationSeconds, 12, accuracy: 1e-10)   // 15 BPM clamps to the 20 BPM floor
         let fast = Song(sections: [SongSection(tempoBPM: 300)], tempoScale: 2)
         XCTAssertEqual(fast.durationSeconds, 0.8, accuracy: 1e-10)
         let rounded = Song(sections: [SongSection(tempoBPM: 91)], tempoScale: 0.95)

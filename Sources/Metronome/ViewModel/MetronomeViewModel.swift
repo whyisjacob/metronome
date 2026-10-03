@@ -655,8 +655,16 @@ final class MetronomeViewModel: ObservableObject {
     /// Applies a new meter: adopts its sensible default accents (compound-aware) and, on a simple↔compound
     /// switch, resets the subdivision to the main beat so a simple-meter subdivision isn't misread as a
     /// compound one (e.g. 4/4 eighths shouldn't carry over as 6/8 "eighths" = a triplet division).
+    ///
+    /// Tempo follows the written notes, not the click: when the counted note changes (4/4 → 4/2, or toggling
+    /// 6/4 between quarter and dotted-half beats), BPM is rescaled so every note keeps its real duration.
+    /// ♩=92 in 4/4 becomes 𝅗𝅥=46 in 4/2 — the same music at the same speed, counted in half notes.
     private static func applyMeter(_ ts: TimeSignature, to config: inout MetronomeConfiguration) {
         let compoundChanged = ts.isCompound != config.timeSignature.isCompound
+        let oldBeat = config.timeSignature.beatValue
+        if ts.beatValue != oldBeat {
+            config.bpm = config.bpm * oldBeat / ts.beatValue   // clamped to tempoRange by updateConfig
+        }
         config.timeSignature = ts
         config.accents = ts.defaultAccents
         if compoundChanged { config.subdivision = .quarter }

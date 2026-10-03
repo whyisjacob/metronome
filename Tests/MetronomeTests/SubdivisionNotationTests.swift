@@ -47,7 +47,7 @@ final class SubdivisionNotationTests: XCTestCase {
                        .init(denominator: 2))
         XCTAssertEqual(Subdivision.quarter.notation(in: TimeSignature(numerator: 6, denominator: 8)),
                        .init(denominator: 4, dotted: true))
-        XCTAssertEqual(Subdivision.quarter.notation(in: TimeSignature(numerator: 6, denominator: 4)),
+        XCTAssertEqual(Subdivision.quarter.notation(in: TimeSignature(numerator: 6, denominator: 4, groupedBeats: true)),
                        .init(denominator: 2, dotted: true))
     }
 }

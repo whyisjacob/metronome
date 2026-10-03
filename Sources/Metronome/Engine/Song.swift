@@ -62,7 +62,7 @@ struct Song: Identifiable, Equatable, Codable {
     /// sum is `totalTicks × secondsPerTick` at each section's own BPM, divided by the scale.
     var durationSeconds: Double {
         // Playback rounds and clamps each scaled BPM; dividing the original duration by the
-        // scale disagrees with what actually plays, especially near the 30/300 BPM limits.
+        // scale disagrees with what actually plays, especially near the 20/300 BPM limits.
         let playback = playbackScaled()
         return playback.sections.reduce(0) { $0 + Double($1.totalTicks) * $1.secondsPerTick }
     }

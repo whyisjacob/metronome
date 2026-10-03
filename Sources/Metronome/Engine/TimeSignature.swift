@@ -17,7 +17,10 @@ struct TimeSignature: Equatable, Hashable, Codable {
         self.numerator = numerator.clamped(to: TimeSignature.numeratorRange)
         self.denominator = TimeSignature.allowedDenominators.contains(denominator) ? denominator : 4
         let canGroup = self.numerator >= 3 && self.numerator % 3 == 0
-        self.groupedBeats = canGroup && (groupedBeats ?? (self.numerator >= 6))
+        // Only eighth/sixteenth meters (6/8, 9/8, 12/8, 9/16 …) default to dotted-beat grouping. Quarter and
+        // half meters (6/4, 9/4, 6/2, 12/4 …) count the denominator note — 6/4 is "1 2 3 4 5 6" — unless the
+        // user explicitly picks the dotted beat via the "Tempo beat" control.
+        self.groupedBeats = canGroup && (groupedBeats ?? (self.numerator >= 6 && self.denominator >= 8))
     }
 
     static let common = TimeSignature(numerator: 4, denominator: 4)
@@ -26,8 +29,8 @@ struct TimeSignature: Equatable, Hashable, Codable {
 
     // MARK: - Compound meter
 
-    /// Conventional compound meters include 6/4, 9/16 and 12/2, not just x/8.
-    /// 3/x defaults to three beats but can explicitly be counted as one dotted beat.
+    /// Any multiple-of-three numerator *can* be grouped into dotted beats (6/4, 9/16, 12/2 …), but only
+    /// x/8 and x/16 do so by default. 3/x defaults to three beats but can explicitly be counted as one.
     var canGroupBeats: Bool { numerator >= 3 && numerator % 3 == 0 }
     var isCompound: Bool { groupedBeats }
     var compoundGroupCount: Int? { isCompound ? numerator / 3 : nil }
@@ -53,6 +56,11 @@ struct TimeSignature: Equatable, Hashable, Codable {
 
     var beatUnitName: String { isCompound ? groupedNoteName : denominatorNoteName }
 
+    /// Length of one counted beat as a fraction of a whole note: the denominator note in a simple meter
+    /// (4/2 → ½, 4/4 → ¼), the dotted note in a grouped/compound one (6/8 → ⅜, 6/4 grouped → ¾).
+    /// The BPM always counts *this* note, so converting tempo between meters is `bpm × oldValue / newValue`.
+    var beatValue: Double { Double(isCompound ? 3 : 1) / Double(denominator) }
+
     enum CodingKeys: String, CodingKey { case numerator, denominator, groupedBeats }
 
     init(from decoder: Decoder) throws {
@@ -77,7 +85,11 @@ struct TimeSignature: Equatable, Hashable, Codable {
         case (5, 8):  return [2, 3]        // 5/8 → accents on 1, 3
         case (5, _):  return [3, 2]        // 5/4 → accents on 1, 4
         case (7, 8):  return [2, 2, 3]     // 7/8 → accents on 1, 3, 5
-        case (6, 4):  return [3, 3]        // 6/4 felt in two → secondary (medium) accent on beat 4
+        // Triple-grouped numerators counted in their denominator note (6/4, 6/8 counted in six, 9/4, 12/4, 6/2 …):
+        // the beats still fall in threes, so each group head after the first takes a secondary accent.
+        case (6, _):  return [3, 3]
+        case (9, _):  return [3, 3, 3]
+        case (12, _): return [3, 3, 3, 3]
         default:      return [max(beatsPerBar, 1)]   // single group: downbeat only
         }
     }

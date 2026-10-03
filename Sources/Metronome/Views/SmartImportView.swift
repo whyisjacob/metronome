@@ -302,9 +302,11 @@ struct SmartImportView: View {
     }
 
     private func applyToMetronome() {
-        metronome.setBPM(Double(vm.tempoBPM))
+        // Meter first, THEN tempo: changing the meter rescales BPM to keep note durations, so the score's
+        // tempo (which is already in the score's beat unit) must be applied last to land unchanged.
         metronome.setNumerator(vm.numerator)
         metronome.setDenominator(vm.denominator)
+        metronome.setBPM(Double(vm.tempoBPM))
     }
 
     /// Applies to the metronome and also seeds a new one-section song from the confirmed values, so the

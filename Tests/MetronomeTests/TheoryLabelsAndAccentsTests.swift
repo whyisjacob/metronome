@@ -115,7 +115,9 @@ final class TheoryLabelsAndAccentsTests: XCTestCase {
     func testAccentDefaultChangesDoNotMoveClickPositions() throws {
         struct Case { let bpm: Double; let ts: TimeSignature; let mainBeats: Int }
         let cases = [
-            Case(bpm: 120, ts: TimeSignature(numerator: 6, denominator: 4), mainBeats: 2),
+            Case(bpm: 120, ts: TimeSignature(numerator: 6, denominator: 4, groupedBeats: true), mainBeats: 2),
+            Case(bpm: 100, ts: TimeSignature(numerator: 6, denominator: 4), mainBeats: 6),
+            Case(bpm: 72, ts: TimeSignature(numerator: 4, denominator: 2), mainBeats: 4),
             Case(bpm: 138, ts: TimeSignature(numerator: 12, denominator: 8), mainBeats: 4),
         ]
 

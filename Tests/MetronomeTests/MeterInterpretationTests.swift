@@ -5,7 +5,7 @@ final class MeterInterpretationTests: XCTestCase {
     func testCompoundQuarterAndSixteenthMetersInRenderedAudio() throws {
         for (numerator, denominator, beats) in [(6, 4, 2), (9, 16, 3)] {
             let config = MetronomeConfiguration(bpm: 120,
-                timeSignature: TimeSignature(numerator: numerator, denominator: denominator),
+                timeSignature: TimeSignature(numerator: numerator, denominator: denominator, groupedBeats: true),
                 subdivision: .eighth)
             let engine = MetronomeEngine()
             try engine.prepareForOfflineRendering(sampleRate: 48_000)
@@ -25,7 +25,7 @@ final class MeterInterpretationTests: XCTestCase {
         for (denominator, name) in [(2, "Dotted whole"), (4, "Dotted half"),
                                     (8, "Dotted quarter"), (16, "Dotted eighth")] {
             for (numerator, beats) in [(6, 2), (9, 3), (12, 4)] {
-                let meter = TimeSignature(numerator: numerator, denominator: denominator)
+                let meter = TimeSignature(numerator: numerator, denominator: denominator, groupedBeats: true)
                 XCTAssertEqual(meter.beatsPerBar, beats)
                 XCTAssertEqual(meter.beatUnitName, name)
                 let config = MetronomeConfiguration(bpm: 60, timeSignature: meter, subdivision: .eighth)
@@ -38,7 +38,7 @@ final class MeterInterpretationTests: XCTestCase {
     }
 
     func testSubdivisionNamesFollowCompoundDivisionUnit() {
-        let half = TimeSignature(numerator: 6, denominator: 4)
+        let half = TimeSignature(numerator: 6, denominator: 4, groupedBeats: true)
         XCTAssertEqual(Subdivision.eighth.displayName(in: half), "Quarters")
         XCTAssertEqual(Subdivision.sixteenth.displayName(in: half), "Eighths")
         XCTAssertEqual(Subdivision.thirtysecond.displayName(in: half), "Sixteenths")
@@ -102,9 +102,43 @@ final class MeterInterpretationTests: XCTestCase {
         XCTAssertEqual(vm.config.subdivision, .quarter)
         XCTAssertEqual(vm.config.accents, [.strong, .medium])
         XCTAssertEqual(vm.pickupTicks, 1)
+        // ♩=92 → dotted half = 92/3: same quarter-note speed, now counted in two.
+        XCTAssertEqual(vm.config.bpm, 92.0 / 3.0, accuracy: 1e-9)
         vm.setGroupedBeats(false)
         XCTAssertEqual(vm.config.beatsPerBar, 6)
-        XCTAssertEqual(vm.config.bpm, 92)
+        XCTAssertEqual(vm.config.bpm, 92, accuracy: 1e-9)
+    }
+
+    /// Music theory: a metronome mark names a note value, and changing how the bar is counted must not
+    /// change how long the written notes last. So the BPM rescales by (old beat ÷ new beat).
+    @MainActor
+    func testChangingCountedNoteKeepsWrittenNoteDurations() {
+        let vm = MetronomeViewModel(config: MetronomeConfiguration(bpm: 92, timeSignature: .common))
+        vm.setDenominator(2)                                   // 4/4 ♩=92 → 4/2 𝅗𝅥=46
+        XCTAssertEqual(vm.config.timeSignature.beatsPerBar, 4)
+        XCTAssertEqual(vm.config.bpm, 46, accuracy: 1e-9)
+        XCTAssertEqual(vm.config.secondsPerBeat, 2 * 60.0 / 92, accuracy: 1e-12)   // half = two quarters
+        vm.setDenominator(4)                                   // and back
+        XCTAssertEqual(vm.config.bpm, 92, accuracy: 1e-9)
+
+        vm.setNumerator(6)                                     // 6/4: still quarters → tempo unchanged
+        XCTAssertEqual(vm.config.timeSignature.beatsPerBar, 6)
+        XCTAssertEqual(vm.config.bpm, 92, accuracy: 1e-9)
+
+        let eighths = MetronomeViewModel(config: MetronomeConfiguration(bpm: 120,
+            timeSignature: TimeSignature(numerator: 3, denominator: 8)))
+        eighths.setNumerator(6)                                // 3/8 ♪=120 → 6/8 dotted ♩=40
+        XCTAssertEqual(eighths.config.timeSignature.beatsPerBar, 2)
+        XCTAssertEqual(eighths.config.bpm, 40, accuracy: 1e-9)
+    }
+
+    func testSimpleMeterBeatUnitIsTheDenominator() {
+        for (n, d, beats, seconds) in [(4, 2, 4, 1.0), (3, 2, 3, 1.0), (2, 2, 2, 1.0), (4, 4, 4, 1.0),
+                                       (6, 4, 6, 1.0), (7, 8, 7, 1.0), (5, 16, 5, 1.0)] {
+            let config = MetronomeConfiguration(bpm: 60, timeSignature: TimeSignature(numerator: n, denominator: d))
+            XCTAssertEqual(config.beatsPerBar, beats, "\(n)/\(d)")
+            XCTAssertEqual(config.secondsPerBeat, seconds, "\(n)/\(d): BPM counts the \(d == 2 ? "half" : "denominator") note")
+        }
     }
 
     func testUnavailablePickupDoesNotShiftOneClickBarBeforeZero() {

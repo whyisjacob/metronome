@@ -63,7 +63,7 @@ final class WatchMetronomeModel: ObservableObject {
         return snapshot?.config ?? MetronomeConfiguration()
     }
     var tempoValue: Double { snapshot?.song.map { $0.tempoScale * 100 } ?? snapshot?.config.bpm ?? 92 }
-    var tempoRange: ClosedRange<Double> { snapshot?.song == nil ? 30...300 : 50...200 }
+    var tempoRange: ClosedRange<Double> { snapshot?.song == nil ? MetronomeConfiguration.tempoRange : 50...200 }
     var tempoUnit: String { snapshot?.song == nil ? "BPM" : "% song tempo" }
     var title: String { snapshot?.song?.name ?? "Maelzel" }
     var startTitle: String { snapshot?.startTitle ?? "Start" }

@@ -23,7 +23,7 @@ final class ClickMathTests: XCTestCase {
     }
 
     func testTempoClamping() {
-        XCTAssertEqual(MetronomeConfiguration(bpm: 5).bpm, 30)
+        XCTAssertEqual(MetronomeConfiguration(bpm: 5).bpm, 20)
         XCTAssertEqual(MetronomeConfiguration(bpm: 9000).bpm, 300)
     }
 
@@ -142,7 +142,9 @@ final class ClickMathTests: XCTestCase {
         XCTAssertTrue(TimeSignature(numerator: 12, denominator: 8).isCompound)
         // Not compound: single-group 3/8, any /4 meter, and non-triple /8 numerators.
         XCTAssertFalse(TimeSignature(numerator: 3, denominator: 8).isCompound)
-        XCTAssertTrue(TimeSignature(numerator: 6, denominator: 4).isCompound)
+        XCTAssertFalse(TimeSignature(numerator: 6, denominator: 4).isCompound)   // 6/4 counts six quarters
+        XCTAssertTrue(TimeSignature(numerator: 6, denominator: 4, groupedBeats: true).isCompound)
+        XCTAssertEqual(TimeSignature(numerator: 4, denominator: 2).beatsPerBar, 4)
         XCTAssertFalse(TimeSignature(numerator: 4, denominator: 8).isCompound)
         XCTAssertFalse(TimeSignature(numerator: 7, denominator: 8).isCompound)
         XCTAssertEqual(TimeSignature(numerator: 12, denominator: 8).compoundGroupCount, 4)
@@ -158,12 +160,12 @@ final class ClickMathTests: XCTestCase {
                        [.strong, .medium, .medium])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 12, denominator: 8)).accents,
                        [.strong, .normal, .medium, .normal])   // compound 4/4: secondary on beat 3
-        // Simple meters: 4/4 keeps its 2+2 (strong, _, medium, _); 6/4 is felt in two → secondary on beat 4;
+        // Simple meters: 4/4 keeps its 2+2 (strong, _, medium, _); 6/4 counts six quarters (3+3) → secondary on beat 4;
         // 3/8 is a single group (downbeat only), NOT compound.
         XCTAssertEqual(MetronomeConfiguration(timeSignature: .common).accents,
                        [.strong, .normal, .medium, .normal])
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 6, denominator: 4)).accents,
-                       [.strong, .medium])   // two dotted-half beats
+                       [.strong, .normal, .normal, .medium, .normal, .normal])   // six quarters, 3+3
         XCTAssertEqual(MetronomeConfiguration(timeSignature: TimeSignature(numerator: 3, denominator: 8)).accents,
                        [.strong, .normal, .normal])
     }
