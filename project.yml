@@ -108,6 +108,9 @@ targets:
             CFBundleTypeRole: Editor
             LSItemContentTypes:
               - app.metronome.mobile.song
+        # Songs are imported (copied) through SongImport, never edited in place, so declare NO.
+        # Required with CFBundleDocumentTypes; without it App Store Connect flags ITMS-90737.
+        LSSupportsOpeningDocumentsInPlace: false
         # Photo Smart Import (camera + photo-library) is excluded from the v1 build (see the `excludes:`
         # under this target's `sources`), so NSCameraUsageDescription and NSPhotoLibraryUsageDescription
         # are intentionally NOT declared: the app links neither API. Restore both keys here — with the
