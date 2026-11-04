@@ -66,10 +66,17 @@ else:
     sid = call("POST", "/v1/reviewSubmissions", {"data": {"type": "reviewSubmissions", "attributes": {"platform": "IOS"},
                "relationships": {"app": {"data": {"type": "apps", "id": APP}}}}})["data"]["id"]
 items = call("GET", f"/v1/reviewSubmissions/{sid}/items")["data"]
-if not items:
-    call("POST", "/v1/reviewSubmissionItems", {"data": {"type": "reviewSubmissionItems",
+for attempt in range(8):
+    if items: break
+    r = requests.post(B + "/v1/reviewSubmissionItems", headers=H, json= {"data": {"type": "reviewSubmissionItems",
          "relationships": {"reviewSubmission": {"data": {"type": "reviewSubmissions", "id": sid}},
                            "appStoreVersion": {"data": {"type": "appStoreVersions", "id": ver["id"]}}}}})
+    print(f"add item attempt {attempt+1}: {r.status_code} {r.text[:300] if r.status_code >= 300 else ''}")
+    if r.status_code < 300: break
+    v = call("GET", f"/v1/appStoreVersions/{ver['id']}")["data"]["attributes"]
+    print(f"  version state now {v.get('appStoreState')}; retry in 45s"); time.sleep(45)
+else:
+    sys.exit("could not add version to submission")
 call("PATCH", f"/v1/reviewSubmissions/{sid}", {"data": {"type": "reviewSubmissions", "id": sid, "attributes": {"submitted": True}}})
 print(f"SUBMITTED {sid}")
 time.sleep(10)
