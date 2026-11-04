@@ -42,7 +42,7 @@ final class DesignReviewTests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         XCTAssertTrue(app.staticTexts["Maelzel"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.buttons["Start metronome"].exists)
+        XCTAssertTrue(app.buttons["Start"].exists)
         capture("01-Main", app)
         for style in ["ball", "dots", "counter", "ring"] {
             app.buttons["Settings"].tap()
@@ -57,7 +57,7 @@ final class DesignReviewTests: XCTestCase {
             option.tap()
             capture("Settings-\(style)", app)
             app.navigationBars["Settings"].buttons["Done"].tap()
-            XCTAssertTrue(app.buttons["Start metronome"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["Start"].waitForExistence(timeout: 10))
             capture("Style-\(style)", app)
         }
     }
