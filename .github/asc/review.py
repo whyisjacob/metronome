@@ -46,7 +46,7 @@ ver = next(d for d in vers if d["attributes"].get("appStoreState") not in ("READ
 # 1. Cancel any open submission (stuck in WAITING_FOR_REVIEW etc.)
 for d in subs:
     st = d["attributes"].get("state")
-    if st in ("WAITING_FOR_REVIEW", "READY_FOR_REVIEW", "UNRESOLVED_ISSUES"):
+    if st in ("WAITING_FOR_REVIEW", "IN_REVIEW", "READY_FOR_REVIEW", "UNRESOLVED_ISSUES"):
         print(f"cancel {d['id']} ({st})")
         call("PATCH", f"/v1/reviewSubmissions/{d['id']}", {"data": {"type": "reviewSubmissions", "id": d["id"], "attributes": {"canceled": True}}})
 for _ in range(40):
