@@ -1,0 +1,19 @@
+name: App Store review (status / submit)
+# Runs on push to ci/asc-review only. MODE comes from .github/asc/mode.
+on:
+  push:
+    branches: [ci/asc-review]
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pyjwt[crypto] requests
+      - name: Review status / submit
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: MODE=$(cat .github/asc/mode) python .github/asc/review.py
