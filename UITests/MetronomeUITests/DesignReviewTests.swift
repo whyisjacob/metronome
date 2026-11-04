@@ -28,12 +28,13 @@ final class DesignReviewTests: XCTestCase {
         let unit = app.segmentedControls["tempo-beat-unit"]
         for _ in 0..<3 where !unit.isHittable { scrollMain(app) }
         XCTAssertTrue(unit.waitForExistence(timeout: 5))
-        XCTAssertTrue(unit.buttons["Dotted half"].isSelected)
-        XCTAssertTrue(app.staticTexts["2 beats per bar · dotted half beat"].exists)
-        capture("Theory-6-4-grouped", app)
-        unit.buttons["Quarter note"].tap()
+        // x/4 meters count the denominator by default (6/4 in six); grouping is an explicit choice.
+        XCTAssertTrue(unit.buttons["Quarter note"].isSelected)
         XCTAssertTrue(app.staticTexts["6 beats per bar · quarter note beat"].exists)
         capture("Theory-6-4-quarter", app)
+        unit.buttons["Dotted half"].tap()
+        XCTAssertTrue(app.staticTexts["2 beats per bar · dotted half beat"].exists)
+        capture("Theory-6-4-grouped", app)
     }
 
     func testAllVisualStylesRemainAvailable() throws {
@@ -41,7 +42,7 @@ final class DesignReviewTests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         XCTAssertTrue(app.staticTexts["Maelzel"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.buttons["Start metronome"].exists)
+        XCTAssertTrue(app.buttons["Start"].exists)
         capture("01-Main", app)
         for style in ["ball", "dots", "counter", "ring"] {
             app.buttons["Settings"].tap()
@@ -56,7 +57,7 @@ final class DesignReviewTests: XCTestCase {
             option.tap()
             capture("Settings-\(style)", app)
             app.navigationBars["Settings"].buttons["Done"].tap()
-            XCTAssertTrue(app.buttons["Start metronome"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["Start"].waitForExistence(timeout: 10))
             capture("Style-\(style)", app)
         }
     }
