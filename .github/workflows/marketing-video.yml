@@ -1,0 +1,64 @@
+name: Marketing video footage
+# Push to ci/marketing-video records the real app (iPhone + Watch simulators) for the launch video.
+on:
+  push:
+    branches: [ci/marketing-video]
+permissions:
+  contents: read
+jobs:
+  record:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -switch /Applications/Xcode.app
+      - run: brew install xcodegen && xcodegen generate
+      - name: Pick devices
+        run: |
+          xcrun simctl list devices available
+          IPH=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];c=[x for r,v in d.items() if 'iOS' in r for x in v if x['name'].startswith('iPhone') and 'Pro' in x['name'] and 'Max' not in x['name']];print(c[-1]['udid'])")
+          WAT=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];c=[x for r,v in d.items() if 'watchOS' in r for x in v if 'Ultra' not in x['name']];print(c[-1]['udid'] if c else '')")
+          echo "IPH=$IPH" >> $GITHUB_ENV; echo "WAT=$WAT" >> $GITHUB_ENV
+          echo "iphone $IPH watch $WAT"
+      - name: Build UI tests
+        run: |
+          xcodebuild -project Metronome.xcodeproj -scheme MetronomeUITests -destination "id=$IPH" -derivedDataPath dd build-for-testing CODE_SIGNING_ALLOWED=NO | tail -5
+      - name: Record iPhone tour
+        run: |
+          mkdir -p out
+          xcrun simctl boot $IPH || true
+          xcrun simctl bootstatus $IPH -b
+          xcrun simctl status_bar $IPH override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
+          xcrun simctl ui $IPH appearance dark || true
+          sleep 5
+          xcrun simctl io $IPH recordVideo --codec h264 --force out/iphone_tour.mp4 > out/rec.log 2>&1 &
+          REC=$!
+          sleep 3
+          python3 -c "import time;print('REC_START', time.time())" > out/marks.txt
+          xcodebuild -project Metronome.xcodeproj -scheme MetronomeUITests -destination "id=$IPH" -derivedDataPath dd test-without-building -only-testing:MetronomeUITests/MarketingTourTests 2>&1 | tee out/test.log | grep -E "TOUR |Test Case|error" || true
+          grep -o "TOUR [^ ]* [0-9.]*" out/test.log >> out/marks.txt || true
+          sleep 2
+          kill -INT $REC; sleep 5
+          cat out/marks.txt; ls -la out
+      - name: Record Watch app
+        if: env.WAT != ''
+        continue-on-error: true
+        run: |
+          xcodebuild -project Metronome.xcodeproj -scheme MaelzelWatch -destination "id=$WAT" -derivedDataPath ddw build CODE_SIGNING_ALLOWED=NO | tail -3
+          APP=$(find ddw -name "*.app" -path "*watchsimulator*" | head -1); echo "$APP"
+          BID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP/Info.plist")
+          xcrun simctl boot $WAT || true; xcrun simctl bootstatus $WAT -b
+          xcrun simctl install $WAT "$APP"
+          for mode in plain song; do
+            ARGS=""; [ $mode = song ] && ARGS="--watch-preview-song"
+            xcrun simctl terminate $WAT $BID || true
+            xcrun simctl launch $WAT $BID $ARGS; sleep 4
+            xcrun simctl io $WAT screenshot out/watch_$mode.png
+            xcrun simctl io $WAT recordVideo --codec h264 --force out/watch_$mode.mp4 & R=$!; sleep 6; kill -INT $R; sleep 3
+          done
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: marketing-footage
+          path: out/
