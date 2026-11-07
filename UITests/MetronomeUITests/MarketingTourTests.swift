@@ -115,7 +115,13 @@ final class MarketingTourTests: XCTestCase {
                     hold(1.5)
                     let s2 = app.staticTexts["Section 2"].firstMatch
                     if s2.waitForExistence(timeout: 3) {
-                        s2.tap()
+                        var w0 = 0
+                        while !s2.isHittable && w0 < 8 { hold(0.5); w0 += 1 }
+                        if s2.isHittable { s2.tap() } else {
+                            mark("s2-not-hittable")
+                            let more = app.buttons["More actions for Section 2"]
+                            if more.exists { more.tap(); hold(0.6); app.buttons["Edit"].firstMatch.tap() }
+                        }
                         if app.navigationBars["Edit Section"].waitForExistence(timeout: 5) {
                             mark("edit-section")
                             hold(1.0)
