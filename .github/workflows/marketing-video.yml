@@ -4,7 +4,7 @@ on:
   push:
     branches: [ci/marketing-video]
 permissions:
-  contents: read
+  contents: write
 jobs:
   record:
     runs-on: macos-latest
@@ -57,6 +57,13 @@ jobs:
             xcrun simctl io $WAT recordVideo --codec h264 --force out/watch_$mode.mp4 & R=$!; sleep 6; kill -INT $R; sleep 3
           done
           ls -la out
+      - name: Push footage to the marketing-footage branch
+        if: always()
+        run: |
+          cd out && rm -f rec.log && git init -q && git checkout -q -b marketing-footage
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com add -A
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "footage $GITHUB_SHA"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" marketing-footage
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -43,10 +43,13 @@ final class MarketingTourTests: XCTestCase {
 
         // Tap tempo.
         let tap = app.buttons["Tap tempo"]
+        var tt = 0
+        while tap.exists && !tap.isHittable && tt < 4 { scrollMain(); tt += 1 }
         if tap.waitForExistence(timeout: 3), tap.isHittable {
             mark("tap-tempo")
             for _ in 0..<5 { tap.tap(); hold(0.42) }
             hold(1.0)
+            scrollTop()
         }
 
         // Start.
@@ -104,9 +107,12 @@ final class MarketingTourTests: XCTestCase {
                     app.navigationBars["Edit Song"].buttons["Done"].tap()
                 }
             }
+            hold(1.5)
             let play = app.buttons["Play New Song"].firstMatch
             if play.waitForExistence(timeout: 10) {
-                play.tap()
+                var w = 0
+                while !play.isHittable && w < 10 { hold(0.5); w += 1 }
+                if play.isHittable { play.tap() } else { play.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
                 if app.buttons["Exit song"].waitForExistence(timeout: 15) {
                     mark("song-now-playing")
                     hold(1.0)
