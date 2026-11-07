@@ -1,0 +1,164 @@
+Command line invocation:
+    /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/xcodebuild -project Metronome.xcodeproj -scheme MetronomeUITests -destination id=98A0BFA3-CEC3-4FD6-9916-5A2149774DBF -derivedDataPath dd test-without-building "-only-testing:MetronomeUITests/MarketingTourTests/testMarketingHook"
+
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:iOS Simulator, arch:arm64, id:98A0BFA3-CEC3-4FD6-9916-5A2149774DBF, OS:26.2, name:iPhone 17 Pro }
+{ platform:iOS Simulator, arch:x86_64, id:98A0BFA3-CEC3-4FD6-9916-5A2149774DBF, OS:26.2, name:iPhone 17 Pro }
+2026-11-07 03:43:56.032195+0000 MetronomeUITests-Runner[8866:32263] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'Selected tests' started at 2026-11-07 03:44:03.192.
+Test Suite 'MetronomeUITests.xctest' started at 2026-11-07 03:44:03.193.
+Test Suite 'MarketingTourTests' started at 2026-11-07 03:44:03.193.
+Test Case '-[MetronomeUITests.MarketingTourTests testMarketingHook]' started.
+    t =     0.00s Start Test at 2026-11-07 03:44:03.197
+2026-11-07 03:44:06.635 xcodebuild[7733:27869] [MT] IDELaunchParametersSnapshot: The operation couldn’t be completed. (DebuggerLLDB.DebuggerVersionStore.StoreError error 0.)
+2026-11-07 03:44:06.635 xcodebuild[7733:27869] [MT] IDELaunchParametersSnapshot: no debugger version
+    t =     0.21s Set Up
+    t =     0.22s Open app.metronome.mobile
+    t =     0.22s     Launch app.metronome.mobile
+    t =    18.45s         Setting up automation session
+    t =    20.65s         Wait for app.metronome.mobile to idle
+    t =    24.18s Waiting 30.0s for "Maelzel" StaticText to exist
+    t =    25.26s     Checking `Expect predicate `existsNoRetry == 1` for object "Maelzel" StaticText`
+    t =    25.26s         Checking existence of `"Maelzel" StaticText`
+    t =    26.84s Find the "Settings" Button
+    t =    27.50s Swipe down ScrollView (First Match)
+    t =    27.50s     Wait for app.metronome.mobile to idle
+    t =    27.51s     Find the ScrollView (First Match)
+    t =    27.57s     Check for interrupting elements affecting ScrollView
+    t =    27.69s     Synthesize event
+    t =    28.33s     Wait for app.metronome.mobile to idle
+    t =    28.80s Waiting 5.0s for "Settings" Button to exist
+    t =    29.88s     Checking `Expect predicate `existsNoRetry == 1` for object "Settings" Button`
+    t =    29.88s         Checking existence of `"Settings" Button`
+    t =    30.13s Find the "Settings" Button
+    t =    30.22s Tap "slider.horizontal.3" Button
+    t =    30.22s     Wait for app.metronome.mobile to idle
+    t =    30.22s     Find the "slider.horizontal.3" Button
+    t =    30.41s     Check for interrupting elements affecting "slider.horizontal.3" Button
+    t =    30.60s     Synthesize event
+    t =    30.90s     Wait for app.metronome.mobile to idle
+    t =    37.21s Waiting 10.0s for "Settings" NavigationBar to exist
+    t =    38.23s     Checking `Expect predicate `existsNoRetry == 1` for object "Settings" NavigationBar`
+    t =    38.23s         Checking existence of `"Settings" NavigationBar`
+    t =    38.44s Find the "Visuals" Button
+    t =    38.70s Find the "Visuals" Button
+    t =    39.08s Tap "Visuals" Button
+    t =    39.08s     Wait for app.metronome.mobile to idle
+    t =    39.09s     Find the "Visuals" Button
+    t =    39.27s     Check for interrupting elements affecting "Visuals" Button
+    t =    39.48s     Synthesize event
+    t =    39.82s     Wait for app.metronome.mobile to idle
+    t =    39.82s Waiting 5.0s for "visual-style-ball" Button to exist
+    t =    40.89s     Checking `Expect predicate `existsNoRetry == 1` for object "visual-style-ball" Button`
+    t =    40.89s         Checking existence of `"visual-style-ball" Button`
+    t =    41.04s Find the "visual-style-ball" Button
+    t =    41.24s Tap "visual-style-ball" Button
+    t =    41.24s     Wait for app.metronome.mobile to idle
+    t =    41.24s     Find the "visual-style-ball" Button
+    t =    41.42s     Check for interrupting elements affecting "visual-style-ball" Button
+    t =    41.56s     Synthesize event
+    t =    41.89s     Wait for app.metronome.mobile to idle
+    t =    41.91s Waiting 5.0s for "Done" Button to exist
+    t =    42.98s     Checking `Expect predicate `existsNoRetry == 1` for object "Done" Button`
+    t =    42.98s         Checking existence of `"Done" Button`
+    t =    43.12s Tap "Done" Button
+    t =    43.12s     Wait for app.metronome.mobile to idle
+    t =    43.13s     Find the "Done" Button
+    t =    43.29s     Check for interrupting elements affecting "Done" Button
+    t =    43.44s     Synthesize event
+    t =    43.77s     Wait for app.metronome.mobile to idle
+    t =    45.32s Find the "Voice" Button
+    t =    46.42s     Find the "Voice" Button (retry 1)
+    t =    47.51s     Find the "Voice" Button (retry 2)
+    t =    47.60s Press Target Application 'app.metronome.mobile'[0.04, 0.80] for 0.1 seconds, then drag to Target Application 'app.metronome.mobile'[0.04, 0.45] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =    47.60s     Wait for app.metronome.mobile to idle
+    t =    47.61s     Find the Target Application 'app.metronome.mobile'
+    t =    47.67s     Check for interrupting elements affecting "Maelzel" Application
+    t =    47.75s     Synthesize event
+    t =    47.76s         Find the Target Application 'app.metronome.mobile'
+    t =    47.81s         Find the Target Application 'app.metronome.mobile'
+    t =    47.86s         Find the Target Application 'app.metronome.mobile'
+    t =    47.94s         Find the Target Application 'app.metronome.mobile'
+    t =    48.00s         Find the Target Application 'app.metronome.mobile'
+    t =    48.96s     Wait for app.metronome.mobile to idle
+    t =    50.52s Find the "Voice" Button
+    t =    51.72s     Find the "Voice" Button (retry 1)
+    t =    52.84s     Find the "Voice" Button (retry 2)
+    t =    52.92s Press Target Application 'app.metronome.mobile'[0.04, 0.80] for 0.1 seconds, then drag to Target Application 'app.metronome.mobile'[0.04, 0.45] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =    52.92s     Wait for app.metronome.mobile to idle
+    t =    52.93s     Find the Target Application 'app.metronome.mobile'
+    t =    53.02s     Check for interrupting elements affecting "Maelzel" Application
+    t =    53.11s     Synthesize event
+    t =    53.12s         Find the Target Application 'app.metronome.mobile'
+    t =    53.18s         Find the Target Application 'app.metronome.mobile'
+    t =    53.26s         Find the Target Application 'app.metronome.mobile'
+    t =    53.30s         Find the Target Application 'app.metronome.mobile'
+    t =    53.35s         Find the Target Application 'app.metronome.mobile'
+    t =    54.37s     Wait for app.metronome.mobile to idle
+    t =    54.74s Find the "Voice" Button
+    t =    54.89s Find the "Voice" Button
+    t =    55.04s Tap "Voice" Button
+    t =    55.04s     Wait for app.metronome.mobile to idle
+    t =    55.04s     Find the "Voice" Button
+    t =    55.20s     Check for interrupting elements affecting "Voice" Button
+    t =    55.34s     Synthesize event
+    t =    55.67s     Wait for app.metronome.mobile to idle
+    t =    55.68s Find the "Settings" Button
+    t =    55.84s Swipe down ScrollView (First Match)
+    t =    55.84s     Wait for app.metronome.mobile to idle
+    t =    55.85s     Find the ScrollView (First Match)
+    t =    55.91s     Check for interrupting elements affecting ScrollView
+    t =    56.01s     Synthesize event
+    t =    56.52s     Wait for app.metronome.mobile to idle
+    t =    58.66s Tap "Start" Button
+    t =    58.66s     Wait for app.metronome.mobile to idle
+    t =    58.67s     Find the "Start" Button
+    t =    58.88s     Check for interrupting elements affecting "Start" Button
+    t =    59.01s     Synthesize event
+    t =    59.33s     Wait for app.metronome.mobile to idle
+    t =    62.38s Swipe down ScrollView (First Match)
+    t =    62.38s     Wait for app.metronome.mobile to idle
+    t =    62.39s     Find the ScrollView (First Match)
+    t =    62.51s     Check for interrupting elements affecting ScrollView
+    t =    62.61s     Synthesize event
+    t =    63.15s     Wait for app.metronome.mobile to idle
+    t =    64.16s Swipe down ScrollView (First Match)
+    t =    64.16s     Wait for app.metronome.mobile to idle
+    t =    64.16s     Find the ScrollView (First Match)
+    t =    64.40s     Check for interrupting elements affecting ScrollView
+    t =    64.55s     Synthesize event
+    t =    65.04s     Wait for app.metronome.mobile to idle
+    t =    66.05s Swipe down ScrollView (First Match)
+    t =    66.05s     Wait for app.metronome.mobile to idle
+    t =    66.06s     Find the ScrollView (First Match)
+    t =    66.22s     Check for interrupting elements affecting ScrollView
+    t =    66.37s     Synthesize event
+    t =    66.93s     Wait for app.metronome.mobile to idle
+TOUR hook-clean 1794023112.655
+    t =    81.49s Checking existence of `"Stop" Button`
+    t =    81.64s Tap "Stop" Button
+    t =    81.64s     Wait for app.metronome.mobile to idle
+    t =    81.64s     Find the "Stop" Button
+    t =    81.71s     Check for interrupting elements affecting "Stop" Button
+    t =    81.82s     Synthesize event
+    t =    82.17s     Wait for app.metronome.mobile to idle
+TOUR end 1794023125.371
+    t =    83.20s Tear Down
+Test Case '-[MetronomeUITests.MarketingTourTests testMarketingHook]' passed (83.627 seconds).
+Test Suite 'MarketingTourTests' passed at 2026-11-07 03:45:26.825.
+	 Executed 1 test, with 0 failures (0 unexpected) in 83.627 (83.631) seconds
+Test Suite 'MetronomeUITests.xctest' passed at 2026-11-07 03:45:26.826.
+	 Executed 1 test, with 0 failures (0 unexpected) in 83.627 (83.633) seconds
+Test Suite 'Selected tests' passed at 2026-11-07 03:45:26.827.
+	 Executed 1 test, with 0 failures (0 unexpected) in 83.627 (83.635) seconds
+2026-11-07 03:45:28.492 xcodebuild[7733:27869] [MT] IDETestOperationsObserverDebug: 173.148 elapsed -- Testing started completed.
+2026-11-07 03:45:28.493 xcodebuild[7733:27869] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-07 03:45:28.493 xcodebuild[7733:27869] [MT] IDETestOperationsObserverDebug: 173.148 sec, +173.148 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/metronome/metronome/dd/Logs/Test/Test-MetronomeUITests-2026.11.07_03-42-30-+0000.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started
