@@ -182,4 +182,35 @@ final class MarketingTourTests: XCTestCase {
         mark("end")
         hold(1.0)
     }
+
+    func testMarketingHook() throws {
+        continueAfterFailure = true
+        app = XCUIApplication()
+        app.launch()
+        _ = app.staticTexts["Maelzel"].waitForExistence(timeout: 30)
+        hold(1.0)
+        if openSettings() {
+            let visuals = app.buttons["Visuals"]
+            var t = 0
+            while !visuals.isHittable && t < 4 { app.swipeUp(); t += 1 }
+            if visuals.isHittable { visuals.tap() }
+            let ball = app.buttons["visual-style-ball"]
+            if ball.waitForExistence(timeout: 5) { t = 0; while !ball.isHittable && t < 3 { app.swipeUp(); t += 1 }; ball.tap() }
+            closeSettings()
+        }
+        let voice = app.buttons["Voice"]
+        var d = 0
+        while !voice.isHittable && d < 8 { scrollMain(); d += 1 }
+        if voice.isHittable { voice.tap() }
+        scrollTop()
+        app.buttons["Start"].tap()
+        hold(1.0)
+        for _ in 0..<3 { app.scrollViews.firstMatch.swipeDown(); hold(0.5) }
+        hold(1.5)
+        mark("hook-clean")
+        hold(12.0)
+        if app.buttons["Stop"].exists { app.buttons["Stop"].tap() }
+        mark("end")
+        hold(1.0)
+    }
 }

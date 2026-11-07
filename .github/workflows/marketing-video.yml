@@ -35,13 +35,13 @@ jobs:
           REC=$!
           sleep 3
           python3 -c "import time;print('REC_START', time.time())" > out/marks.txt
-          xcodebuild -project Metronome.xcodeproj -scheme MetronomeUITests -destination "id=$IPH" -derivedDataPath dd test-without-building -only-testing:MetronomeUITests/MarketingTourTests 2>&1 | tee out/test.log | grep -E "TOUR |Test Case|error" || true
+          xcodebuild -project Metronome.xcodeproj -scheme MetronomeUITests -destination "id=$IPH" -derivedDataPath dd test-without-building -only-testing:MetronomeUITests/MarketingTourTests/testMarketingHook 2>&1 | tee out/test.log | grep -E "TOUR |Test Case|error" || true
           grep -o "TOUR [^ ]* [0-9.]*" out/test.log >> out/marks.txt || true
           sleep 2
           kill -INT $REC; sleep 5
           cat out/marks.txt; ls -la out
       - name: Record Watch app
-        if: env.WAT != ''
+        if: false
         continue-on-error: true
         run: |
           xcodebuild -project Metronome.xcodeproj -scheme MaelzelWatch -destination "id=$WAT" -derivedDataPath ddw build CODE_SIGNING_ALLOWED=NO | tail -3
