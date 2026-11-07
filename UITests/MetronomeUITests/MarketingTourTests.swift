@@ -119,8 +119,7 @@ final class MarketingTourTests: XCTestCase {
                         while !s2.isHittable && w0 < 8 { hold(0.5); w0 += 1 }
                         if s2.isHittable { s2.tap() } else {
                             mark("s2-not-hittable")
-                            let more = app.buttons["More actions for Section 2"]
-                            if more.exists { more.tap(); hold(0.6); app.buttons["Edit"].firstMatch.tap() }
+                            s2.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                         }
                         if app.navigationBars["Edit Section"].waitForExistence(timeout: 5) {
                             mark("edit-section")
@@ -141,7 +140,9 @@ final class MarketingTourTests: XCTestCase {
                     hold(2.5)
                     let playSong = app.buttons["Play song"]
                     var k = 0; while playSong.exists && !playSong.isHittable && k < 3 { app.swipeUp(); k += 1 }
-                    if playSong.isHittable { playSong.tap(); mark("play-song-tapped") } else { mark("play-song-missing") }
+                    if playSong.isHittable { playSong.tap(); mark("play-song-tapped") }
+                    else if playSong.exists { playSong.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); mark("play-song-coord") }
+                    else { mark("play-song-missing") }
                 }
             }
             if app.buttons["Exit song"].waitForExistence(timeout: 15) {
